@@ -1,0 +1,6 @@
+const configuredApiBaseUrl = (import.meta.env.VITE_API_BASE_URL || '').trim().replace(/\/+$/, '');
+
+export function buildApiUrl(path: string) {
+  return configuredApiBaseUrl ? `${configuredApiBaseUrl}${path}` : path;
+}
+

@@ -1,6 +1,6 @@
 
 import React, { useState, useRef, useEffect } from 'react';
-import { getShoppingAssistantResponse } from '../services/service';
+import { getShoppingAssistantResponse } from '../services/geminiService';
 import { Product } from '../types';
 
 interface Message {

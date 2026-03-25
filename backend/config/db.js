@@ -7,6 +7,8 @@ const READY_STATE_LABEL = {
   3: "disconnecting",
 };
 
+let connectionPromise = null;
+
 async function connectDB() {
   const uri = process.env.MONGODB_URI;
 
@@ -14,12 +16,27 @@ async function connectDB() {
     throw new Error("MONGODB_URI is not configured.");
   }
 
-  await mongoose.connect(uri, {
-    dbName: process.env.MONGODB_DB || undefined,
-  });
+  if (mongoose.connection.readyState === 1) {
+    return mongoose.connection;
+  }
 
-  const state = READY_STATE_LABEL[mongoose.connection.readyState] || "unknown";
-  console.log(`[db] ${state}: ${mongoose.connection.host}/${mongoose.connection.name}`);
+  if (!connectionPromise) {
+    connectionPromise = mongoose
+      .connect(uri, {
+        dbName: process.env.MONGODB_DB || undefined,
+      })
+      .then(() => {
+        const state = READY_STATE_LABEL[mongoose.connection.readyState] || "unknown";
+        console.log(`[db] ${state}: ${mongoose.connection.host}/${mongoose.connection.name}`);
+        return mongoose.connection;
+      })
+      .catch((error) => {
+        connectionPromise = null;
+        throw error;
+      });
+  }
+
+  return connectionPromise;
 }
 
 function getDBStatus() {

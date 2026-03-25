@@ -1,12 +1,7 @@
 import { Product } from "../types";
+import { buildApiUrl } from "./apiBase";
 
-const API_BASE_URL = (
-  import.meta.env.VITE_API_BASE_URL ||
-  process.env.VITE_API_BASE_URL ||
-  "http://localhost:5000"
-).replace(/\/+$/, "");
-
-const PRODUCTS_ENDPOINT = `${API_BASE_URL}/api/products`;
+const PRODUCTS_ENDPOINT = buildApiUrl("/api/products");
 const REQUEST_TIMEOUT_MS = 8000;
 
 interface ProductListResponse {

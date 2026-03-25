@@ -1,13 +1,8 @@
 import { CartItem } from "../types";
+import { buildApiUrl } from "./apiBase";
 import { authHeaders } from "./authService";
 
-const API_BASE_URL = (
-  import.meta.env.VITE_API_BASE_URL ||
-  process.env.VITE_API_BASE_URL ||
-  "http://localhost:5000"
-).replace(/\/+$/, "");
-
-const CART_ENDPOINT = `${API_BASE_URL}/api/cart`;
+const CART_ENDPOINT = buildApiUrl("/api/cart");
 const REQUEST_TIMEOUT_MS = 8000;
 
 interface CartSummary {

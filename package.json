@@ -4,15 +4,20 @@
   "version": "1.0.0",
   "description": "Lumina Commerce monorepo",
   "private": true,
+  "workspaces": [
+    "frontend",
+    "backend"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "dev": "npm run dev:frontend",
     "server": "npm run dev:backend",
-    "dev:frontend": "npm --prefix frontend run dev",
-    "dev:backend": "npm --prefix backend run dev",
-    "build": "npm --prefix frontend run build",
-    "typecheck": "npm --prefix frontend run typecheck",
-    "install:frontend": "npm --prefix frontend install",
-    "install:backend": "npm --prefix backend install",
-    "install:all": "npm run install:frontend && npm run install:backend"
+    "dev:frontend": "npm run dev --workspace frontend",
+    "dev:backend": "npm run dev --workspace backend",
+    "build": "npm run build --workspace frontend",
+    "typecheck": "npm run typecheck --workspace frontend",
+    "start": "npm run start --workspace backend"
   }
 }

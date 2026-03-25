@@ -1,10 +1,6 @@
 import { User } from "../types";
+import { buildApiUrl } from "./apiBase";
 
-const API_BASE_URL = (
-  import.meta.env.VITE_API_BASE_URL ||
-  process.env.VITE_API_BASE_URL ||
-  "http://localhost:5000"
-).replace(/\/+$/, "");
 const AUTH_TOKEN_STORAGE_KEY = "lumina_auth_token";
 
 interface AuthResponse {
@@ -17,7 +13,7 @@ interface MeResponse {
 }
 
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
-  const response = await fetch(`${API_BASE_URL}${path}`, {
+  const response = await fetch(buildApiUrl(path), {
     ...options,
     headers: {
       "Content-Type": "application/json",
