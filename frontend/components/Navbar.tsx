@@ -32,12 +32,10 @@ const Navbar: React.FC<NavbarProps> = ({
   const navItems: { label: string; view: AppView }[] = user
     ? [
         { label: 'Shop', view: 'shop' },
-        { label: 'Git Push', view: 'git' },
       ]
     : [
         { label: 'Home', view: 'home' },
         { label: 'Shop', view: 'shop' },
-        { label: 'Git Push', view: 'git' },
       ];
 
   if (user?.role === 'admin') {

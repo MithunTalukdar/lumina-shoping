@@ -34,4 +34,4 @@ export interface Order {
   createdAt: string;
 }
 
-export type AppView = 'home' | 'shop' | 'git' | 'product' | 'cart' | 'wishlist' | 'admin' | 'orders';
+export type AppView = 'home' | 'shop' | 'product' | 'cart' | 'wishlist' | 'admin' | 'orders';

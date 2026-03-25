@@ -3,7 +3,6 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Product, CartItem, User, AppView } from './types';
 import { INITIAL_PRODUCTS } from './constants';
 import FilterBar from './components/FilterBar';
-import GitPushPanel from './components/GitPushPanel';
 import Navbar from './components/Navbar';
 import ProductSection from './components/ProductSection';
 import ShoppingAssistant from './components/ShoppingAssistant';
@@ -1252,7 +1251,6 @@ const App: React.FC = () => {
       <main className="flex-grow max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         {currentView === 'home' && renderHome()}
         {currentView === 'shop' && renderShop()}
-        {currentView === 'git' && <GitPushPanel />}
         {currentView === 'product' && renderProductDetails()}
         {currentView === 'cart' && renderCart()}
         {currentView === 'wishlist' && renderWishlist()}
