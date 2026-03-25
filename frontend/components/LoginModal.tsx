@@ -6,6 +6,7 @@ interface LoginModalProps {
   initialMode?: "login" | "register";
   isSubmitting: boolean;
   errorMessage: string | null;
+  contextMessage?: string | null;
   onClose: () => void;
   onLogin: (email: string, password: string) => Promise<void>;
   onRegister: (name: string, email: string, password: string) => Promise<void>;
@@ -17,6 +18,7 @@ const LoginModal: React.FC<LoginModalProps> = ({
   initialMode = "login",
   isSubmitting,
   errorMessage,
+  contextMessage,
   onClose,
   onLogin,
   onRegister,
@@ -134,6 +136,12 @@ const LoginModal: React.FC<LoginModalProps> = ({
 
           {errorMessage && (
             <p className="rounded-lg bg-red-50 px-3 py-2 text-sm font-medium text-red-700">{errorMessage}</p>
+          )}
+
+          {contextMessage && (
+            <p className="rounded-lg border border-cyan-100 bg-cyan-50 px-3 py-2 text-sm font-medium text-cyan-800">
+              {contextMessage}
+            </p>
           )}
 
           <button

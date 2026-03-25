@@ -40,6 +40,15 @@ const userSchema = new mongoose.Schema(
         },
       },
     ],
+    wishlistItems: [
+      {
+        productId: {
+          type: String,
+          required: true,
+          trim: true,
+        },
+      },
+    ],
   },
   {
     timestamps: true,

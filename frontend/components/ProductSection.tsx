@@ -9,9 +9,11 @@ interface ProductSectionProps {
   products: Product[];
   visibleCount: number;
   isLoading: boolean;
+  isLocked: boolean;
   onLoadMore: () => void;
   onViewAll: () => void;
   onAddToCart: (product: Product) => void;
+  onBuyNow: (product: Product) => void;
   onToggleWishlist: (product: Product) => void;
   isWishlisted: (productId: string) => boolean;
   onSelectProduct: (product: Product) => void;
@@ -26,9 +28,11 @@ const ProductSection: React.FC<ProductSectionProps> = ({
   products,
   visibleCount,
   isLoading,
+  isLocked,
   onLoadMore,
   onViewAll,
   onAddToCart,
+  onBuyNow,
   onToggleWishlist,
   isWishlisted,
   onSelectProduct,
@@ -50,6 +54,11 @@ const ProductSection: React.FC<ProductSectionProps> = ({
             <span className="inline-flex w-fit items-center rounded-full border border-white/10 bg-white/5 px-4 py-2 text-xs font-bold uppercase tracking-[0.16em] text-slate-200">
               {products.length} Styles
             </span>
+            {isLocked && (
+              <span className="inline-flex w-fit items-center rounded-full border border-amber-300/20 bg-amber-300/10 px-4 py-2 text-xs font-bold uppercase tracking-[0.16em] text-amber-100">
+                Login to Unlock Actions
+              </span>
+            )}
             <button
               type="button"
               onClick={onViewAll}
@@ -90,9 +99,11 @@ const ProductSection: React.FC<ProductSectionProps> = ({
                   key={product.id}
                   product={product}
                   onAddToCart={onAddToCart}
+                  onBuyNow={onBuyNow}
                   onToggleWishlist={onToggleWishlist}
                   isWishlisted={isWishlisted(product.id)}
                   onClick={onSelectProduct}
+                  isLocked={isLocked}
                 />
               ))}
             </div>

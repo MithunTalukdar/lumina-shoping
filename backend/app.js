@@ -8,6 +8,7 @@ const assistantRoutes = require("./routes/assistant");
 const authRoutes = require("./routes/auth");
 const cartRoutes = require("./routes/cart");
 const productRoutes = require("./routes/products");
+const wishlistRoutes = require("./routes/wishlist");
 
 loadEnv();
 
@@ -67,7 +68,8 @@ app.use(async (req, _res, next) => {
   const needsDatabase =
     req.path === "/api/db-status" ||
     req.path.startsWith("/api/auth") ||
-    req.path.startsWith("/api/cart");
+    req.path.startsWith("/api/cart") ||
+    req.path.startsWith("/api/wishlist");
 
   if (!needsDatabase) {
     return next();
@@ -90,6 +92,7 @@ app.get("/api/db-status", (_req, res) => {
 
 app.use("/api/auth", authRoutes);
 app.use("/api/cart", cartRoutes);
+app.use("/api/wishlist", wishlistRoutes);
 
 app.use((error, _req, res, _next) => {
   if (error.message && error.message.includes("CORS")) {

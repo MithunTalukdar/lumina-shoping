@@ -1,16 +1,19 @@
 
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { Product, CartItem, User, AppView } from './types';
+import { Product, CartItem, AppView } from './types';
 import { INITIAL_PRODUCTS } from './constants';
 import FilterBar from './components/FilterBar';
 import Navbar from './components/Navbar';
 import ProductSection from './components/ProductSection';
 import ShoppingAssistant from './components/ShoppingAssistant';
 import LoginModal from './components/LoginModal';
-import { getCurrentUser, login, logout, register } from './services/authService';
+import ShopUnlockBanner from './components/ShopUnlockBanner';
+import RecommendationRail from './components/RecommendationRail';
 import { checkoutCart, getCart, saveCart } from './services/cartService';
 import { getProducts } from './services/productService';
+import { getWishlist, saveWishlist } from './services/wishlistService';
 import { formatPrice } from './utils/currency';
+import { AuthMode, useAuth } from './context/AuthContext';
 
 type LocationFilter = 'All' | 'India' | 'NRI' | 'Dhaka';
 
@@ -102,19 +105,43 @@ const mergeCartItems = (serverItems: CartItem[], localItems: CartItem[]) => {
   return Array.from(mergedItems.values());
 };
 
+const mergeWishlistItems = (serverItems: Product[], localItems: Product[]) => {
+  const mergedItems = new Map<string, Product>();
+
+  serverItems.forEach((item) => {
+    mergedItems.set(item.id, item);
+  });
+
+  localItems.forEach((item) => {
+    mergedItems.set(item.id, item);
+  });
+
+  return Array.from(mergedItems.values());
+};
+
 const App: React.FC = () => {
+  const {
+    user,
+    isAuthLoading,
+    isAuthSubmitting,
+    isLoginModalOpen,
+    authMode,
+    authError,
+    authPromptMessage,
+    openAuthModal,
+    closeAuthModal,
+    loginWithPassword,
+    registerWithPassword,
+    handleLogout: logoutUser,
+    handleGoogleAuth,
+  } = useAuth();
+
   // State
   const [products, setProducts] = useState<Product[]>(INITIAL_PRODUCTS);
   const [cart, setCart] = useState<CartItem[]>([]);
   const [wishlist, setWishlist] = useState<Product[]>([]);
   const [view, setView] = useState<AppView>('home');
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
-  const [user, setUser] = useState<User | null>(null);
-  const [isAuthLoading, setIsAuthLoading] = useState(true);
-  const [isAuthSubmitting, setIsAuthSubmitting] = useState(false);
-  const [authError, setAuthError] = useState<string | null>(null);
-  const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
-  const [isLoginModalOpen, setIsLoginModalOpen] = useState(false);
   const [isCheckoutLoading, setIsCheckoutLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedLocation, setSelectedLocation] = useState<LocationFilter>('All');
@@ -124,29 +151,14 @@ const App: React.FC = () => {
   const [isCartLoading, setIsCartLoading] = useState(false);
   const [isCartSyncing, setIsCartSyncing] = useState(false);
   const [cartError, setCartError] = useState<string | null>(null);
+  const [isWishlistLoading, setIsWishlistLoading] = useState(false);
+  const [isWishlistSyncing, setIsWishlistSyncing] = useState(false);
+  const [wishlistError, setWishlistError] = useState<string | null>(null);
   const cartRef = useRef<CartItem[]>([]);
+  const wishlistRef = useRef<Product[]>([]);
   const skipNextCartSyncRef = useRef(false);
-
-  useEffect(() => {
-    let mounted = true;
-
-    const bootstrapAuth = async () => {
-      const currentUser = await getCurrentUser();
-
-      if (!mounted) {
-        return;
-      }
-
-      setUser(currentUser);
-      setIsAuthLoading(false);
-    };
-
-    bootstrapAuth();
-
-    return () => {
-      mounted = false;
-    };
-  }, []);
+  const skipNextWishlistSyncRef = useRef(false);
+  const pendingProtectedViewRef = useRef<AppView | null>(null);
 
   useEffect(() => {
     let mounted = true;
@@ -201,6 +213,11 @@ const App: React.FC = () => {
     if (user && view === 'home') {
       setView('shop');
     }
+
+    if (user && pendingProtectedViewRef.current) {
+      setView(pendingProtectedViewRef.current);
+      pendingProtectedViewRef.current = null;
+    }
   }, [isAuthLoading, user, view]);
 
   useEffect(() => {
@@ -208,8 +225,29 @@ const App: React.FC = () => {
   }, [cart]);
 
   useEffect(() => {
+    wishlistRef.current = wishlist;
+  }, [wishlist]);
+
+  useEffect(() => {
     setVisibleCounts(createInitialVisibleCounts());
   }, [searchQuery, selectedLocation]);
+
+  useEffect(() => {
+    if (isAuthLoading || user) {
+      return;
+    }
+
+    skipNextCartSyncRef.current = true;
+    skipNextWishlistSyncRef.current = true;
+    setCart([]);
+    setWishlist([]);
+    setCartError(null);
+    setWishlistError(null);
+    setIsCartLoading(false);
+    setIsCartSyncing(false);
+    setIsWishlistLoading(false);
+    setIsWishlistSyncing(false);
+  }, [isAuthLoading, user]);
 
   useEffect(() => {
     if (isAuthLoading) {
@@ -314,6 +352,109 @@ const App: React.FC = () => {
     };
   }, [cart, user, isCartLoading]);
 
+  useEffect(() => {
+    if (isAuthLoading) {
+      return;
+    }
+
+    if (!user) {
+      setIsWishlistLoading(false);
+      setIsWishlistSyncing(false);
+      setWishlistError(null);
+      return;
+    }
+
+    let mounted = true;
+
+    const loadAccountWishlist = async () => {
+      skipNextWishlistSyncRef.current = true;
+      setIsWishlistLoading(true);
+      setWishlistError(null);
+
+      try {
+        const response = await getWishlist();
+
+        if (!mounted) {
+          return;
+        }
+
+        const mergedWishlist = mergeWishlistItems(response.items, wishlistRef.current);
+
+        if (wishlistRef.current.length > 0) {
+          await saveWishlist(mergedWishlist);
+
+          if (!mounted) {
+            return;
+          }
+        }
+
+        skipNextWishlistSyncRef.current = true;
+        setWishlist(mergedWishlist);
+      } catch (error) {
+        if (!mounted) {
+          return;
+        }
+
+        const message = error instanceof Error ? error.message : 'Unable to load your wishlist.';
+        setWishlistError(message);
+      } finally {
+        if (mounted) {
+          setIsWishlistLoading(false);
+        }
+      }
+    };
+
+    loadAccountWishlist();
+
+    return () => {
+      mounted = false;
+    };
+  }, [isAuthLoading, user]);
+
+  useEffect(() => {
+    if (!user || isWishlistLoading) {
+      return;
+    }
+
+    if (skipNextWishlistSyncRef.current) {
+      skipNextWishlistSyncRef.current = false;
+      return;
+    }
+
+    let mounted = true;
+
+    const syncWishlist = async () => {
+      setIsWishlistSyncing(true);
+
+      try {
+        await saveWishlist(wishlist);
+
+        if (!mounted) {
+          return;
+        }
+
+        setWishlistError(null);
+      } catch (error) {
+        if (!mounted) {
+          return;
+        }
+
+        const message = error instanceof Error ? error.message : 'Unable to sync your wishlist.';
+        setWishlistError(message);
+      } finally {
+        if (mounted) {
+          setIsWishlistSyncing(false);
+        }
+      }
+    };
+
+    syncWishlist();
+
+    return () => {
+      mounted = false;
+    };
+  }, [wishlist, user, isWishlistLoading]);
+
   // Derived State
   const shopProducts = useMemo(
     () => products.filter(isStorefrontProduct),
@@ -343,9 +484,41 @@ const App: React.FC = () => {
   const wishlistCount = useMemo(() => wishlist.length, [wishlist]);
   const canAccessAdmin = user?.role === 'admin';
   const currentView = user && view === 'home' ? 'shop' : view;
+  const personalizedRecommendations = useMemo(() => {
+    if (!user) {
+      return [];
+    }
+
+    const seedCategory = wishlist[0]?.category || cart[0]?.category;
+    const excludedIds = new Set([...wishlist.map((item) => item.id), ...cart.map((item) => item.id)]);
+    const preferredPool = filteredProducts.filter((product) =>
+      product.category === seedCategory && !excludedIds.has(product.id)
+    );
+    const fallbackPool = filteredProducts.filter((product) => !excludedIds.has(product.id));
+    const sortedPool = [...(preferredPool.length > 0 ? preferredPool : fallbackPool)].sort(
+      (left, right) => right.rating * 100 + right.reviewsCount - (left.rating * 100 + left.reviewsCount)
+    );
+
+    return sortedPool.slice(0, 3);
+  }, [user, wishlist, cart, filteredProducts]);
 
   // Handlers
-  const addToCart = (product: Product) => {
+  const promptForAuth = (mode: AuthMode, message: string, nextView?: AppView) => {
+    pendingProtectedViewRef.current = nextView ?? null;
+
+    openAuthModal(mode, message);
+  };
+
+  const goToView = (nextView: AppView) => {
+    if (!user && (nextView === 'cart' || nextView === 'wishlist')) {
+      promptForAuth('login', 'Log in to unlock your synced bag and saved wishlist.', nextView);
+      return;
+    }
+
+    setView(user && nextView === 'home' ? 'shop' : nextView);
+  };
+
+  const upsertCartItem = (product: Product) => {
     setCart(prev => {
       const existing = prev.find(item => item.id === product.id);
       if (existing) {
@@ -355,7 +528,32 @@ const App: React.FC = () => {
     });
   };
 
+  const addToCart = (product: Product) => {
+    if (!user) {
+      promptForAuth('login', 'Log in to add this style to your bag and keep it synced across visits.');
+      return;
+    }
+
+    upsertCartItem(product);
+  };
+
+  const handleBuyNow = (product: Product) => {
+    if (!user) {
+      promptForAuth('register', 'Create your account to unlock instant checkout for this product.');
+      return;
+    }
+
+    upsertCartItem(product);
+    setSelectedProduct(product);
+    setView('cart');
+  };
+
   const toggleWishlist = (product: Product) => {
+    if (!user) {
+      promptForAuth('login', 'Log in to save favorites and unlock your personal wishlist.');
+      return;
+    }
+
     setWishlist(prev => {
       const alreadyExists = prev.some(item => item.id === product.id);
       if (alreadyExists) {
@@ -386,6 +584,11 @@ const App: React.FC = () => {
   };
 
   const handleCheckout = async () => {
+    if (!user) {
+      promptForAuth('register', 'Sign up to unlock checkout, order history, and secure bag sync.');
+      return;
+    }
+
     if (cart.length === 0) {
       return;
     }
@@ -393,19 +596,12 @@ const App: React.FC = () => {
     setIsCheckoutLoading(true);
 
     try {
-      if (user) {
-        const response = await checkoutCart();
-        skipNextCartSyncRef.current = true;
-        setCart([]);
-        setCartError(null);
-        alert(`${response.message} Total charged: ${formatPrice(response.orderSummary.total)}`);
-      } else {
-        await new Promise((resolve) => window.setTimeout(resolve, 1200));
-        setCart([]);
-        alert('Order placed successfully! Sign in next time to keep your bag synced.');
-      }
-
-      setView(user ? 'shop' : 'home');
+      const response = await checkoutCart();
+      skipNextCartSyncRef.current = true;
+      setCart([]);
+      setCartError(null);
+      alert(`${response.message} Total charged: ${formatPrice(response.orderSummary.total)}`);
+      setView('shop');
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Checkout failed.';
       setCartError(message);
@@ -415,61 +611,45 @@ const App: React.FC = () => {
     }
   };
 
-  const handleLogin = async (email: string, password: string) => {
-    setAuthError(null);
-    setIsAuthSubmitting(true);
-
-    try {
-      const loggedInUser = await login(email, password);
-      setCartError(null);
-      setUser(loggedInUser);
-      setIsLoginModalOpen(false);
-      setView('shop');
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Login failed.';
-      setAuthError(message);
-    } finally {
-      setIsAuthSubmitting(false);
-    }
-  };
-
-  const handleRegister = async (name: string, email: string, password: string) => {
-    setAuthError(null);
-    setIsAuthSubmitting(true);
-
-    try {
-      const createdUser = await register(name, email, password);
-      setCartError(null);
-      setUser(createdUser);
-      setIsLoginModalOpen(false);
-      setView('shop');
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Registration failed.';
-      setAuthError(message);
-    } finally {
-      setIsAuthSubmitting(false);
-    }
-  };
-
-  const handleGoogleAuth = () => {
-    setAuthError(null);
-    window.open('https://accounts.google.com/', '_blank', 'noopener,noreferrer');
-  };
-
-  const handleLogout = async () => {
-    try {
-      await logout();
-    } catch (error) {
-      console.error('Logout failed:', error);
-    }
-    skipNextCartSyncRef.current = true;
-    setCart([]);
-    setIsCartLoading(false);
-    setIsCartSyncing(false);
-    setCartError(null);
-    setUser(null);
-    setView('home');
-  };
+  const renderProtectedAccessPanel = (
+    eyebrow: string,
+    title: string,
+    description: string,
+    primaryLabel: string,
+    secondaryLabel: string
+  ) => (
+    <div className="py-14">
+      <section className="relative overflow-hidden rounded-[2.8rem] border border-white/70 bg-[radial-gradient(circle_at_top_left,_rgba(56,189,248,0.16),_transparent_32%),radial-gradient(circle_at_bottom_right,_rgba(249,115,22,0.14),_transparent_32%),linear-gradient(180deg,rgba(255,255,255,0.96),rgba(248,250,252,0.94))] px-6 py-14 shadow-[0_26px_80px_-38px_rgba(15,23,42,0.35)] sm:px-10">
+        <div className="pointer-events-none absolute -left-10 top-4 h-44 w-44 rounded-full bg-cyan-200/35 blur-3xl" />
+        <div className="pointer-events-none absolute bottom-0 right-0 h-52 w-52 rounded-full bg-orange-200/35 blur-3xl" />
+        <div className="relative mx-auto max-w-3xl text-center">
+          <span className="inline-flex rounded-full border border-cyan-200 bg-white/80 px-4 py-1.5 text-[11px] font-black uppercase tracking-[0.22em] text-cyan-700">
+            {eyebrow}
+          </span>
+          <h2 className="mt-5 text-4xl font-black tracking-tight text-slate-950 sm:text-5xl">{title}</h2>
+          <p className="mx-auto mt-4 max-w-2xl text-base font-medium leading-relaxed text-slate-600 sm:text-lg">
+            {description}
+          </p>
+          <div className="mt-8 flex flex-col justify-center gap-3 sm:flex-row">
+            <button
+              type="button"
+              onClick={() => promptForAuth('login', description)}
+              className="rounded-2xl bg-slate-950 px-7 py-3.5 text-sm font-black uppercase tracking-[0.14em] text-white transition-transform hover:-translate-y-0.5"
+            >
+              {primaryLabel}
+            </button>
+            <button
+              type="button"
+              onClick={() => promptForAuth('register', description)}
+              className="rounded-2xl border border-slate-200 bg-white px-7 py-3.5 text-sm font-black uppercase tracking-[0.14em] text-slate-700 transition-transform hover:-translate-y-0.5 hover:border-cyan-200 hover:text-cyan-700"
+            >
+              {secondaryLabel}
+            </button>
+          </div>
+        </div>
+      </section>
+    </div>
+  );
 
   // Views
   const renderHome = () => {
@@ -559,6 +739,8 @@ const App: React.FC = () => {
                       <img
                         src={product.image}
                         alt={product.name}
+                        loading="lazy"
+                        decoding="async"
                         className={`w-full object-cover transition-transform duration-500 group-hover:scale-105 ${
                           index === 0 ? 'h-56' : 'h-40'
                         }`}
@@ -622,11 +804,13 @@ const App: React.FC = () => {
               {spotlightProducts.map(product => (
                 <article key={product.id} className="group rounded-2xl border border-white/80 bg-white/85 p-3 shadow-md backdrop-blur-sm">
                   <div className="relative overflow-hidden rounded-2xl">
-                    <img
-                      src={product.image}
-                      alt={product.name}
-                      className="h-40 w-full object-cover transition-transform duration-500 group-hover:scale-105"
-                    />
+                     <img
+                       src={product.image}
+                       alt={product.name}
+                       loading="lazy"
+                       decoding="async"
+                       className="h-40 w-full object-cover transition-transform duration-500 group-hover:scale-105"
+                     />
                     <span className="absolute left-3 top-3 rounded-full bg-black/65 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.13em] text-white">
                       {product.category}
                     </span>
@@ -654,7 +838,10 @@ const App: React.FC = () => {
   };
 
   const renderShop = () => {
-    const sourceLabel = productsSource === 'api' ? 'Live Fashion API' : 'Curated Fallback Catalog';
+    const isDemoMode = !user;
+    const sourceLabel = productsSource === 'api'
+      ? isDemoMode ? 'Live Demo Feed' : 'Live Fashion API'
+      : isDemoMode ? 'Curated Demo Catalog' : 'Curated Fallback Catalog';
     const spotlightProducts = filteredProducts.slice(0, 2);
     const clothingCount = filteredProducts.filter(product => product.type === 'clothing').length;
     const shoeCount = filteredProducts.filter(product => product.type === 'shoes').length;
@@ -668,6 +855,15 @@ const App: React.FC = () => {
 
     return (
       <div className="py-10 space-y-10">
+        <ShopUnlockBanner
+          isAuthenticated={Boolean(user)}
+          userName={user?.name}
+          cartCount={cartCount}
+          wishlistCount={wishlistCount}
+          onLogin={() => promptForAuth('login', 'Log in to unlock bag sync, wishlist saves, and checkout.')}
+          onRegister={() => promptForAuth('register', 'Create your account to unlock premium pricing moments and checkout.')}
+        />
+
         <section className="fashion-stage relative overflow-hidden rounded-[2.6rem] border border-white/10 px-6 py-8 shadow-2xl sm:px-8 lg:px-10">
           <div className="pointer-events-none absolute -left-16 top-8 h-44 w-44 rounded-full bg-cyan-400/20 blur-3xl" />
           <div className="pointer-events-none absolute right-0 top-0 h-56 w-56 rounded-full bg-rose-400/20 blur-3xl" />
@@ -681,10 +877,14 @@ const App: React.FC = () => {
 
               <div className="space-y-3">
                 <h1 className="max-w-3xl text-4xl font-black tracking-tight text-white sm:text-5xl xl:text-[4.25rem] xl:leading-[0.96]">
-                  Dynamic fashion sections powered by your live product API.
+                  {isDemoMode
+                    ? 'Browse the drop in demo mode, then log in to turn intent into checkout.'
+                    : `Dynamic fashion sections, now tailored for ${user?.name || 'you'}.`}
                 </h1>
                 <p className="max-w-2xl text-base font-medium leading-relaxed text-slate-300 sm:text-lg">
-                  Browse premium clothing and footwear by collection, filter the feed by location, and load more products section by section.
+                  {isDemoMode
+                    ? 'Preview every collection, quick-view products, and feel the storefront. Login unlocks bag actions, wishlist saves, and personalized picks instantly.'
+                    : 'Browse premium clothing and footwear by collection, filter the feed by location, and enjoy a fully unlocked shopping journey.'}
                 </p>
               </div>
 
@@ -703,7 +903,7 @@ const App: React.FC = () => {
                   <p className="mt-2 text-lg font-black text-white">{sourceLabel}</p>
                 </div>
                 <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
-                  <p className="text-xs font-bold uppercase tracking-[0.16em] text-slate-400">Visible Feed</p>
+                  <p className="text-xs font-bold uppercase tracking-[0.16em] text-slate-400">{isDemoMode ? 'Demo Feed' : 'Visible Feed'}</p>
                   <p className="mt-2 text-lg font-black text-white">{filteredProducts.length}</p>
                 </div>
                 <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
@@ -711,8 +911,8 @@ const App: React.FC = () => {
                   <p className="mt-2 text-lg font-black text-white">{clothingCount} / {shoeCount}</p>
                 </div>
                 <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
-                  <p className="text-xs font-bold uppercase tracking-[0.16em] text-slate-400">Location</p>
-                  <p className="mt-2 text-lg font-black text-white">{locationLabel}</p>
+                  <p className="text-xs font-bold uppercase tracking-[0.16em] text-slate-400">{isDemoMode ? 'Unlocks' : 'Location'}</p>
+                  <p className="mt-2 text-lg font-black text-white">{isDemoMode ? 'Bag + Wishlist + Checkout' : locationLabel}</p>
                 </div>
               </div>
             </div>
@@ -747,6 +947,8 @@ const App: React.FC = () => {
                       <img
                         src={product.image}
                         alt={product.name}
+                        loading="lazy"
+                        decoding="async"
                         className="h-72 w-full object-cover transition-transform duration-700 group-hover:scale-110"
                       />
                       <div className="absolute inset-0 bg-gradient-to-t from-slate-950 via-slate-950/10 to-transparent" />
@@ -783,6 +985,20 @@ const App: React.FC = () => {
           </div>
         </section>
 
+        {user && (
+          <RecommendationRail
+            title={`Recommended for ${user.name}`}
+            subtitle="Personalized Picks"
+            products={personalizedRecommendations}
+            onSelectProduct={(selected) => {
+              setSelectedProduct(selected);
+              setView('product');
+            }}
+            onAddToCart={addToCart}
+            onBuyNow={handleBuyNow}
+          />
+        )}
+
         <div className="space-y-8">
           {sections.map((section) => (
             <ProductSection
@@ -793,6 +1009,7 @@ const App: React.FC = () => {
               products={section.products}
               visibleCount={visibleCounts[section.id] ?? SECTION_PAGE_SIZE}
               isLoading={isProductsLoading}
+              isLocked={isDemoMode}
               onLoadMore={() =>
                 setVisibleCounts((current) => ({
                   ...current,
@@ -809,6 +1026,7 @@ const App: React.FC = () => {
                 }))
               }
               onAddToCart={addToCart}
+              onBuyNow={handleBuyNow}
               onToggleWishlist={toggleWishlist}
               isWishlisted={isWishlisted}
               onSelectProduct={(selected) => {
@@ -848,6 +1066,15 @@ const App: React.FC = () => {
           </div>
 
           <div className="space-y-8">
+            {!user && (
+              <div className="rounded-[1.8rem] border border-amber-300/20 bg-amber-300/10 px-5 py-4">
+                <p className="text-xs font-black uppercase tracking-[0.16em] text-amber-200">Demo Preview</p>
+                <p className="mt-2 text-sm font-medium leading-relaxed text-slate-300">
+                  You are previewing the full product detail experience. Log in to unlock bag actions, wishlist saves, and instant checkout.
+                </p>
+              </div>
+            )}
+
             <div className="space-y-4">
               <div className="flex flex-wrap gap-2">
                 <span className="rounded-full border border-cyan-300/20 bg-cyan-400/10 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.18em] text-cyan-200">
@@ -895,25 +1122,41 @@ const App: React.FC = () => {
               </div>
             </div>
 
-            <div className="flex flex-col gap-6 border-t border-white/10 pt-8 sm:flex-row">
+            <div className="grid gap-4 border-t border-white/10 pt-8 sm:grid-cols-3">
               <button
                 onClick={() => addToCart(selectedProduct)}
-                className="flex-[2] rounded-[1.5rem] bg-white py-5 text-lg font-bold text-slate-950 transition-all flex items-center justify-center space-x-3 shadow-xl transform hover:-translate-y-1 hover:bg-cyan-300"
+                className={`rounded-[1.5rem] py-5 text-lg font-bold transition-all flex items-center justify-center space-x-3 shadow-xl ${
+                  user
+                    ? 'bg-white text-slate-950 hover:-translate-y-1 hover:bg-cyan-300'
+                    : 'border border-white/10 bg-white/10 text-white backdrop-blur-sm hover:bg-white/15'
+                }`}
               >
                 <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 11V7a4 4 0 00-8 0v4M5 9h14l1 12H4L5 9z" />
                 </svg>
-                <span>Add to Bag</span>
+                <span>{user ? 'Add to Bag' : 'Unlock Bag'}</span>
+              </button>
+              <button
+                onClick={() => handleBuyNow(selectedProduct)}
+                className={`rounded-[1.5rem] border-2 py-5 font-bold text-lg transition-all ${
+                  user
+                    ? 'border-cyan-300/20 bg-cyan-400/10 text-cyan-100 hover:border-cyan-300 hover:text-white'
+                    : 'border-amber-300/20 bg-amber-300/10 text-amber-50 hover:bg-amber-300/15'
+                }`}
+              >
+                {user ? 'Buy Now' : 'Unlock Checkout'}
               </button>
               <button
                 onClick={() => toggleWishlist(selectedProduct)}
-                className={`flex-1 border-2 py-5 rounded-[1.5rem] font-bold text-lg transition-all ${
+                className={`border-2 py-5 rounded-[1.5rem] font-bold text-lg transition-all ${
                   isWishlisted(selectedProduct.id)
                     ? 'border-pink-500 bg-pink-500 text-white hover:bg-pink-600 hover:border-pink-600'
-                    : 'border-white/15 text-gray-900 hover:border-cyan-300 hover:text-cyan-200'
+                    : user
+                      ? 'border-white/15 text-gray-900 hover:border-cyan-300 hover:text-cyan-200'
+                      : 'border-white/15 bg-white/5 text-white hover:border-pink-300 hover:bg-white/10'
                 }`}
               >
-                {isWishlisted(selectedProduct.id) ? 'Wishlisted' : 'Wishlist'}
+                {isWishlisted(selectedProduct.id) ? 'Wishlisted' : user ? 'Wishlist' : 'Unlock Wishlist'}
               </button>
             </div>
 
@@ -952,19 +1195,28 @@ const App: React.FC = () => {
     );
   };
 
-  const renderCart = () => (
-    <div className="py-12 max-w-5xl mx-auto">
+  const renderCart = () => {
+    if (!user) {
+      return renderProtectedAccessPanel(
+        'Members Only',
+        'Your bag unlocks after login.',
+        'Sign in to add products, sync your bag, and move from discovery to checkout without losing your picks.',
+        'Login to Unlock Bag',
+        'Create Account'
+      );
+    }
+
+    return (
+      <div className="py-12 max-w-5xl mx-auto">
       <div className="mb-8 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <h1 className="text-5xl font-extrabold text-gray-900 tracking-tight">Your Shopping Bag</h1>
         <div className="flex flex-wrap items-center gap-3">
           <span className="rounded-full border border-white/40 bg-white/60 px-4 py-2 text-xs font-black uppercase tracking-[0.14em] text-gray-700">
-            {user ? 'Account Bag' : 'Guest Bag'}
+            Account Bag
           </span>
-          {user && (
-            <span className="rounded-full border border-cyan-200 bg-cyan-50 px-4 py-2 text-xs font-black uppercase tracking-[0.14em] text-cyan-700">
-              {isCartLoading ? 'Loading Bag' : isCartSyncing ? 'Syncing Bag' : 'Bag Synced'}
-            </span>
-          )}
+          <span className="rounded-full border border-cyan-200 bg-cyan-50 px-4 py-2 text-xs font-black uppercase tracking-[0.14em] text-cyan-700">
+            {isCartLoading ? 'Loading Bag' : isCartSyncing ? 'Syncing Bag' : 'Bag Synced'}
+          </span>
         </div>
       </div>
 
@@ -999,7 +1251,7 @@ const App: React.FC = () => {
             {cart.map(item => (
               <div key={item.id} className="flex space-x-8 p-6 glass-effect rounded-[2rem] border border-white/50 shadow-sm">
                 <div className="w-32 h-32 rounded-2xl overflow-hidden flex-shrink-0 shadow-md">
-                  <img src={item.image} alt={item.name} className="w-full h-full object-cover" />
+                    <img src={item.image} alt={item.name} loading="lazy" decoding="async" className="w-full h-full object-cover" />
                 </div>
                 <div className="flex-1 flex flex-col justify-between">
                   <div className="flex justify-between items-start">
@@ -1073,16 +1325,40 @@ const App: React.FC = () => {
           </div>
         </div>
       )}
-    </div>
-  );
+      </div>
+    );
+  };
 
-  const renderWishlist = () => (
-    <div className="py-12 max-w-6xl mx-auto">
+  const renderWishlist = () => {
+    if (!user) {
+      return renderProtectedAccessPanel(
+        'Wishlist Lock',
+        'Save favorites after you sign in.',
+        'Create an account to keep your wishlist synced, revisit standout products, and unlock personalized recommendations.',
+        'Login to Save Favorites',
+        'Sign Up for Deals'
+      );
+    }
+
+    return (
+      <div className="py-12 max-w-6xl mx-auto">
       <div className="flex items-center justify-between gap-4 mb-10">
-        <h1 className="text-5xl font-extrabold text-gray-900 tracking-tight">Your Wishlist</h1>
-        <span className="rounded-full bg-pink-500 px-4 py-2 text-xs font-black uppercase tracking-[0.14em] text-white">
-          {wishlistCount} Saved
-        </span>
+        <div className="space-y-3">
+          <h1 className="text-5xl font-extrabold text-gray-900 tracking-tight">Your Wishlist</h1>
+          {wishlistError && (
+            <p className="rounded-2xl border border-red-200 bg-red-50 px-5 py-3 text-sm font-semibold text-red-600">
+              {wishlistError}
+            </p>
+          )}
+        </div>
+        <div className="flex flex-wrap items-center gap-3">
+          <span className="rounded-full bg-pink-500 px-4 py-2 text-xs font-black uppercase tracking-[0.14em] text-white">
+            {wishlistCount} Saved
+          </span>
+          <span className="rounded-full border border-pink-200 bg-pink-50 px-4 py-2 text-xs font-black uppercase tracking-[0.14em] text-pink-700">
+            {isWishlistLoading ? 'Loading Wishlist' : isWishlistSyncing ? 'Syncing Wishlist' : 'Wishlist Synced'}
+          </span>
+        </div>
       </div>
 
       {wishlist.length === 0 ? (
@@ -1105,7 +1381,7 @@ const App: React.FC = () => {
           {wishlist.map(item => (
             <article key={item.id} className="glass-effect rounded-[2rem] border border-white/60 p-5 shadow-xl space-y-5">
               <div className="relative overflow-hidden rounded-2xl bg-white/30">
-                <img src={item.image} alt={item.name} className="h-56 w-full object-cover" />
+                <img src={item.image} alt={item.name} loading="lazy" decoding="async" className="h-56 w-full object-cover" />
                 <span className="absolute left-3 top-3 rounded-full bg-black/60 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.12em] text-white">
                   {item.category}
                 </span>
@@ -1138,8 +1414,9 @@ const App: React.FC = () => {
           ))}
         </div>
       )}
-    </div>
-  );
+      </div>
+    );
+  };
 
   const renderAdmin = () => (
     <div className="py-12">
@@ -1232,23 +1509,19 @@ const App: React.FC = () => {
     <div className="dark-theme min-h-screen flex flex-col">
       <Navbar 
         currentView={currentView} 
-        setView={(nextView) => setView(user && nextView === 'home' ? 'shop' : nextView)} 
+        setView={goToView} 
         cartCount={cartCount} 
         wishlistCount={wishlistCount}
         user={user}
         isAuthLoading={isAuthLoading}
-        onLogin={() => {
-          setAuthError(null);
-          setAuthMode('login');
-          setIsLoginModalOpen(true);
-        }}
-        onRegister={() => {
-          setAuthError(null);
-          setAuthMode('register');
-          setIsLoginModalOpen(true);
-        }}
+        onLogin={() => promptForAuth('login', 'Login to unlock the full shopping experience.')}
+        onRegister={() => promptForAuth('register', 'Create your account to unlock premium deals and checkout.')}
         onGoogle={handleGoogleAuth}
-        onLogout={handleLogout}
+        onLogout={() => {
+          pendingProtectedViewRef.current = null;
+          logoutUser();
+          setView('home');
+        }}
       />
 
       <main className="flex-grow max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -1280,15 +1553,13 @@ const App: React.FC = () => {
         initialMode={authMode}
         isSubmitting={isAuthSubmitting}
         errorMessage={authError}
+        contextMessage={authPromptMessage}
         onClose={() => {
-          if (isAuthSubmitting) {
-            return;
-          }
-          setAuthError(null);
-          setIsLoginModalOpen(false);
+          pendingProtectedViewRef.current = null;
+          closeAuthModal();
         }}
-        onLogin={handleLogin}
-        onRegister={handleRegister}
+        onLogin={loginWithPassword}
+        onRegister={registerWithPassword}
         onGoogle={handleGoogleAuth}
       />
     </div>
