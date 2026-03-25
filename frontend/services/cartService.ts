@@ -1,0 +1,212 @@
+import { CartItem } from "../types";
+import { authHeaders } from "./authService";
+
+const API_BASE_URL = (
+  import.meta.env.VITE_API_BASE_URL ||
+  process.env.VITE_API_BASE_URL ||
+  "http://localhost:5000"
+).replace(/\/+$/, "");
+
+const CART_ENDPOINT = `${API_BASE_URL}/api/cart`;
+const REQUEST_TIMEOUT_MS = 8000;
+
+interface CartSummary {
+  subtotal: number;
+  shipping: number;
+  tax: number;
+  total: number;
+  currency: string;
+}
+
+interface CartResponse {
+  items: CartItem[];
+  summary: CartSummary;
+}
+
+export interface CheckoutResponse {
+  message: string;
+  orderSummary: CartSummary;
+  items: CartItem[];
+}
+
+function isNonEmptyString(value: unknown): value is string {
+  return typeof value === "string" && value.trim().length > 0;
+}
+
+function isNumber(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value);
+}
+
+function buildFallbackSummary(items: CartItem[]): CartSummary {
+  const subtotal = items.reduce((sum, item) => sum + item.price * item.quantity, 0);
+  const shipping = 0;
+  const tax = Math.round(subtotal * 0.1);
+
+  return {
+    subtotal,
+    shipping,
+    tax,
+    total: subtotal + shipping + tax,
+    currency: "INR",
+  };
+}
+
+function normalizeCartItem(value: unknown): CartItem | null {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+
+  const item = value as Record<string, unknown>;
+
+  if (
+    !isNonEmptyString(item.id) ||
+    !isNonEmptyString(item.name) ||
+    !isNonEmptyString(item.description) ||
+    !isNonEmptyString(item.category) ||
+    !isNonEmptyString(item.image) ||
+    !isNumber(item.price) ||
+    !isNumber(item.stock) ||
+    !isNumber(item.rating) ||
+    !isNumber(item.reviewsCount) ||
+    !isNumber(item.quantity)
+  ) {
+    return null;
+  }
+
+  return {
+    id: item.id,
+    name: item.name,
+    description: item.description,
+    price: item.price,
+    category: item.category,
+    gender: isNonEmptyString(item.gender) ? item.gender as CartItem["gender"] : "men",
+    type: isNonEmptyString(item.type) ? item.type as CartItem["type"] : "clothing",
+    location: isNonEmptyString(item.location) ? item.location as CartItem["location"] : "India",
+    image: item.image,
+    stock: item.stock,
+    rating: item.rating,
+    reviewsCount: item.reviewsCount,
+    quantity: Math.max(1, Math.min(20, Math.round(item.quantity))),
+  };
+}
+
+function normalizeCartItems(value: unknown): CartItem[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .map(normalizeCartItem)
+    .filter((item): item is CartItem => item !== null);
+}
+
+function normalizeSummary(value: unknown, items: CartItem[]): CartSummary {
+  if (!value || typeof value !== "object") {
+    return buildFallbackSummary(items);
+  }
+
+  const summary = value as Record<string, unknown>;
+  if (
+    !isNumber(summary.subtotal) ||
+    !isNumber(summary.shipping) ||
+    !isNumber(summary.tax) ||
+    !isNumber(summary.total)
+  ) {
+    return buildFallbackSummary(items);
+  }
+
+  return {
+    subtotal: summary.subtotal,
+    shipping: summary.shipping,
+    tax: summary.tax,
+    total: summary.total,
+    currency: isNonEmptyString(summary.currency) ? summary.currency : "INR",
+  };
+}
+
+function normalizeCartResponse(value: unknown): CartResponse {
+  const payload = value && typeof value === "object" ? (value as Record<string, unknown>) : {};
+  const items = normalizeCartItems(payload.items);
+
+  return {
+    items,
+    summary: normalizeSummary(payload.summary, items),
+  };
+}
+
+function normalizeCheckoutResponse(value: unknown): CheckoutResponse {
+  const payload = value && typeof value === "object" ? (value as Record<string, unknown>) : {};
+  const items = normalizeCartItems(payload.items);
+
+  return {
+    message: isNonEmptyString(payload.message) ? payload.message : "Order placed successfully.",
+    orderSummary: normalizeSummary(payload.orderSummary, items),
+    items,
+  };
+}
+
+async function request(path: string, options: RequestInit = {}) {
+  const controller = new AbortController();
+  const timeoutId = window.setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+
+  try {
+    const response = await fetch(`${CART_ENDPOINT}${path}`, {
+      ...options,
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+        ...authHeaders(),
+        ...(options.headers || {}),
+      },
+      signal: controller.signal,
+    });
+
+    const data = await response.json().catch(() => null);
+
+    if (!response.ok) {
+      const message =
+        data && typeof data === "object" && "message" in data && isNonEmptyString(data.message)
+          ? data.message
+          : "Cart request failed.";
+
+      throw new Error(message);
+    }
+
+    return data;
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "AbortError") {
+      throw new Error("Cart request timed out.");
+    }
+
+    throw error instanceof Error ? error : new Error("Unable to complete cart request.");
+  } finally {
+    window.clearTimeout(timeoutId);
+  }
+}
+
+export async function getCart(): Promise<CartResponse> {
+  return normalizeCartResponse(await request("", { method: "GET" }));
+}
+
+export async function saveCart(items: CartItem[]): Promise<CartResponse> {
+  return normalizeCartResponse(
+    await request("", {
+      method: "PUT",
+      body: JSON.stringify({
+        items: items.map((item) => ({
+          productId: item.id,
+          quantity: item.quantity,
+        })),
+      }),
+    })
+  );
+}
+
+export async function checkoutCart(): Promise<CheckoutResponse> {
+  return normalizeCheckoutResponse(
+    await request("/checkout", {
+      method: "POST",
+      body: JSON.stringify({}),
+    })
+  );
+}

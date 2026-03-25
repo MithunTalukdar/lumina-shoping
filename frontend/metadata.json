@@ -1,0 +1,8 @@
+
+{
+  "name": "Lumina Commerce",
+  "description": "A high-performance, modern e-commerce storefront featuring a smart shopping assistant, dynamic product management, and a seamless checkout experience.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}

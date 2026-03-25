@@ -1,0 +1,159 @@
+:root {
+  --lumina-ink: #f8fafc;
+  --lumina-mint: #2dd4bf;
+  --lumina-coral: #fb7185;
+  --lumina-sand: #0b1220;
+  color-scheme: dark;
+}
+
+.dark-theme {
+  color: #e2e8f0;
+}
+
+.dark-theme .glass-effect {
+  background: rgba(15, 23, 42, 0.74);
+  backdrop-filter: blur(16px);
+  border: 1px solid rgba(148, 163, 184, 0.2);
+}
+
+.home-orbit-bg {
+  background:
+    radial-gradient(circle at 10% 20%, rgba(251, 113, 133, 0.3), transparent 35%),
+    radial-gradient(circle at 85% 15%, rgba(45, 212, 191, 0.28), transparent 32%),
+    radial-gradient(circle at 35% 85%, rgba(59, 130, 246, 0.2), transparent 40%),
+    linear-gradient(135deg, rgba(15, 23, 42, 0.95), rgba(17, 24, 39, 0.92));
+}
+
+.home-grid-overlay {
+  background-image:
+    linear-gradient(rgba(148, 163, 184, 0.15) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(148, 163, 184, 0.15) 1px, transparent 1px);
+  background-size: 30px 30px;
+  mask-image: radial-gradient(circle at center, black 35%, transparent 100%);
+}
+
+.shop-command-deck {
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  background:
+    radial-gradient(circle at 0% 0%, rgba(244, 114, 182, 0.14), transparent 42%),
+    radial-gradient(circle at 100% 0%, rgba(45, 212, 191, 0.13), transparent 38%),
+    linear-gradient(130deg, rgba(15, 23, 42, 0.9), rgba(10, 20, 38, 0.95));
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.06),
+    0 24px 50px -30px rgba(2, 6, 23, 0.9);
+}
+
+.shop-command-grid {
+  background-image:
+    linear-gradient(rgba(148, 163, 184, 0.11) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(148, 163, 184, 0.11) 1px, transparent 1px);
+  background-size: 26px 26px;
+  mask-image: radial-gradient(circle at center, black 30%, transparent 100%);
+}
+
+.dark-theme .text-gray-900,
+.dark-theme .text-slate-900 {
+  color: #f8fafc !important;
+}
+
+.dark-theme .text-gray-600,
+.dark-theme .text-gray-500,
+.dark-theme .text-gray-400,
+.dark-theme .text-slate-700,
+.dark-theme .text-slate-600,
+.dark-theme .text-slate-500 {
+  color: #94a3b8 !important;
+}
+
+.dark-theme .bg-white,
+.dark-theme .bg-white\/40,
+.dark-theme .bg-white\/50,
+.dark-theme .bg-white\/60,
+.dark-theme .bg-white\/70,
+.dark-theme .bg-white\/75,
+.dark-theme .bg-white\/80,
+.dark-theme .bg-white\/85,
+.dark-theme .bg-white\/90,
+.dark-theme .bg-slate-100 {
+  background-color: rgba(15, 23, 42, 0.72) !important;
+  color: #e2e8f0;
+}
+
+.dark-theme .bg-indigo-50,
+.dark-theme .bg-indigo-50\/50,
+.dark-theme .bg-purple-50,
+.dark-theme .bg-green-50 {
+  background-color: rgba(30, 41, 59, 0.72) !important;
+}
+
+.dark-theme .border-gray-100,
+.dark-theme .border-gray-200,
+.dark-theme .border-gray-300,
+.dark-theme .border-slate-100,
+.dark-theme .border-slate-200,
+.dark-theme .border-white\/20,
+.dark-theme .border-white\/30,
+.dark-theme .border-white\/40,
+.dark-theme .border-white\/50,
+.dark-theme .border-white\/60,
+.dark-theme .border-white\/70,
+.dark-theme .border-white\/80 {
+  border-color: rgba(100, 116, 139, 0.35) !important;
+}
+
+.dark-theme input,
+.dark-theme textarea,
+.dark-theme select {
+  background-color: rgba(15, 23, 42, 0.7) !important;
+  color: #e2e8f0 !important;
+  border-color: rgba(100, 116, 139, 0.45) !important;
+}
+
+.dark-theme input::placeholder,
+.dark-theme textarea::placeholder {
+  color: #64748b !important;
+}
+
+.dark-theme .shadow-inner {
+  box-shadow: inset 0 2px 6px rgba(2, 6, 23, 0.5);
+}
+
+.float-slow {
+  animation: float-slow 7s ease-in-out infinite;
+}
+
+.float-slower {
+  animation: float-slow 9s ease-in-out infinite;
+}
+
+.fashion-stage {
+  background:
+    radial-gradient(circle at 12% 12%, rgba(45, 212, 191, 0.22), transparent 30%),
+    radial-gradient(circle at 88% 0%, rgba(251, 113, 133, 0.2), transparent 34%),
+    radial-gradient(circle at 60% 100%, rgba(245, 158, 11, 0.12), transparent 26%),
+    linear-gradient(135deg, rgba(2, 6, 23, 0.98), rgba(15, 23, 42, 0.92));
+}
+
+.fashion-section-shell {
+  background:
+    linear-gradient(180deg, rgba(15, 23, 42, 0.92), rgba(2, 6, 23, 0.9)),
+    linear-gradient(135deg, rgba(255, 255, 255, 0.04), transparent);
+}
+
+.copy-clamp-2 {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+}
+
+@keyframes float-slow {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+
+  50% {
+    transform: translateY(-8px);
+  }
+}
