@@ -451,6 +451,11 @@ const App: React.FC = () => {
     }
   };
 
+  const handleGoogleAuth = () => {
+    setAuthError(null);
+    window.open('https://accounts.google.com/', '_blank', 'noopener,noreferrer');
+  };
+
   const handleLogout = async () => {
     try {
       await logout();
@@ -1242,9 +1247,7 @@ const App: React.FC = () => {
           setAuthMode('register');
           setIsLoginModalOpen(true);
         }}
-        onGoogle={() => {
-          window.open('https://accounts.google.com/', '_blank', 'noopener,noreferrer');
-        }}
+        onGoogle={handleGoogleAuth}
         onLogout={handleLogout}
       />
 
@@ -1286,6 +1289,7 @@ const App: React.FC = () => {
         }}
         onLogin={handleLogin}
         onRegister={handleRegister}
+        onGoogle={handleGoogleAuth}
       />
     </div>
   );

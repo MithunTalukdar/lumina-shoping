@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import GoogleIcon from "./GoogleIcon";
 
 interface LoginModalProps {
   isOpen: boolean;
@@ -8,6 +9,7 @@ interface LoginModalProps {
   onClose: () => void;
   onLogin: (email: string, password: string) => Promise<void>;
   onRegister: (name: string, email: string, password: string) => Promise<void>;
+  onGoogle: () => void;
 }
 
 const LoginModal: React.FC<LoginModalProps> = ({
@@ -18,6 +20,7 @@ const LoginModal: React.FC<LoginModalProps> = ({
   onClose,
   onLogin,
   onRegister,
+  onGoogle,
 }) => {
   const [mode, setMode] = useState<"login" | "register">(initialMode);
   const [name, setName] = useState("");
@@ -139,6 +142,22 @@ const LoginModal: React.FC<LoginModalProps> = ({
             className="w-full rounded-xl bg-indigo-600 py-3 text-sm font-bold text-white transition-colors hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-70"
           >
             {isSubmitting ? "Please wait..." : mode === "login" ? "Login" : "Create Account"}
+          </button>
+
+          <div className="flex items-center gap-3 pt-1">
+            <span className="h-px flex-1 bg-gray-200" />
+            <span className="text-xs font-semibold uppercase tracking-[0.18em] text-gray-400">or</span>
+            <span className="h-px flex-1 bg-gray-200" />
+          </div>
+
+          <button
+            type="button"
+            onClick={onGoogle}
+            disabled={isSubmitting}
+            className="flex w-full items-center justify-center gap-3 rounded-xl border border-slate-200 bg-white py-3 text-sm font-semibold text-slate-700 transition-colors hover:border-slate-300 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-70"
+          >
+            <GoogleIcon className="h-5 w-5" />
+            <span>{mode === "login" ? "Continue with Google" : "Sign up with Google"}</span>
           </button>
         </form>
       </div>
