@@ -1,10 +1,23 @@
 
 import React, { useState, useEffect, useMemo, useRef } from 'react';
+import {
+  ArrowRight,
+  CreditCard,
+  Heart,
+  Minus,
+  Plus,
+  ShieldCheck,
+  ShoppingBag,
+  Sparkles,
+  Trash2,
+  Truck,
+} from 'lucide-react';
 import { Product, CartItem, AppView } from './types';
 import { INITIAL_PRODUCTS } from './constants';
 import FilterBar from './components/FilterBar';
 import Navbar from './components/Navbar';
 import ProductSection from './components/ProductSection';
+import ProfilePage, { type ProfilePageTab } from './components/ProfilePage';
 import ShoppingAssistant from './components/ShoppingAssistant';
 import LoginModal from './components/LoginModal';
 import ShopUnlockBanner from './components/ShopUnlockBanner';
@@ -55,11 +68,56 @@ const SHOP_SECTIONS = [
 const SECTION_PAGE_SIZE = 8;
 const SECTION_PAGE_STEP = 4;
 
+type AppRoute = AppView | 'login';
+
 const createInitialVisibleCounts = () =>
   SHOP_SECTIONS.reduce<Record<string, number>>((accumulator, section) => {
     accumulator[section.id] = SECTION_PAGE_SIZE;
     return accumulator;
   }, {});
+
+const getPathForRoute = (route: AppRoute) => {
+  switch (route) {
+    case 'home':
+      return '/';
+    case 'shop':
+    case 'product':
+      return '/shop';
+    case 'cart':
+      return '/cart';
+    case 'wishlist':
+      return '/wishlist';
+    case 'profile':
+      return '/profile';
+    case 'admin':
+      return '/admin';
+    case 'login':
+      return '/login';
+    default:
+      return '/';
+  }
+};
+
+const getRouteFromPath = (pathname: string): AppRoute => {
+  switch (pathname) {
+    case '/':
+      return 'home';
+    case '/shop':
+      return 'shop';
+    case '/cart':
+      return 'cart';
+    case '/wishlist':
+      return 'wishlist';
+    case '/profile':
+      return 'profile';
+    case '/admin':
+      return 'admin';
+    case '/login':
+      return 'login';
+    default:
+      return 'home';
+  }
+};
 
 const isStorefrontProduct = (item: Product) =>
   (item.gender === 'men' || item.gender === 'women') &&
@@ -154,6 +212,7 @@ const App: React.FC = () => {
   const [isWishlistLoading, setIsWishlistLoading] = useState(false);
   const [isWishlistSyncing, setIsWishlistSyncing] = useState(false);
   const [wishlistError, setWishlistError] = useState<string | null>(null);
+  const [profileInitialTab, setProfileInitialTab] = useState<ProfilePageTab>('profile');
   const cartRef = useRef<CartItem[]>([]);
   const wishlistRef = useRef<Product[]>([]);
   const skipNextCartSyncRef = useRef(false);
@@ -210,13 +269,73 @@ const App: React.FC = () => {
       return;
     }
 
-    if (user && view === 'home') {
-      setView('shop');
+    const applyLocation = () => {
+      const route = getRouteFromPath(window.location.pathname);
+
+      if (route === 'login') {
+        if (user) {
+          const fallbackView = pendingProtectedViewRef.current ?? 'shop';
+          pendingProtectedViewRef.current = null;
+          window.history.replaceState(null, '', getPathForRoute(fallbackView));
+          setView(fallbackView);
+          return;
+        }
+
+        setView('home');
+        openAuthModal('login', 'Log in to access your profile dashboard, order history, and secure account settings.');
+        return;
+      }
+
+      if (route === 'profile') {
+        setProfileInitialTab('profile');
+
+        if (!user) {
+          pendingProtectedViewRef.current = 'profile';
+          setView('home');
+          window.history.replaceState(null, '', getPathForRoute('login'));
+          openAuthModal('login', 'Log in to open your profile dashboard, order history, and password settings.');
+          return;
+        }
+
+        setView('profile');
+        return;
+      }
+
+      if ((route === 'cart' || route === 'wishlist') && !user) {
+        pendingProtectedViewRef.current = route;
+        setView('home');
+        window.history.replaceState(null, '', getPathForRoute('login'));
+        openAuthModal('login', 'Log in to unlock your synced bag, favorites, and member tools.');
+        return;
+      }
+
+      setView(user && route === 'home' ? 'shop' : route);
+    };
+
+    applyLocation();
+    window.addEventListener('popstate', applyLocation);
+
+    return () => {
+      window.removeEventListener('popstate', applyLocation);
+    };
+  }, [isAuthLoading, user]);
+
+  useEffect(() => {
+    if (isAuthLoading) {
+      return;
     }
 
     if (user && pendingProtectedViewRef.current) {
-      setView(pendingProtectedViewRef.current);
+      const nextView = pendingProtectedViewRef.current;
       pendingProtectedViewRef.current = null;
+      window.history.replaceState(null, '', getPathForRoute(nextView));
+      setView(nextView);
+      return;
+    }
+
+    if (user && view === 'home' && window.location.pathname === '/') {
+      window.history.replaceState(null, '', getPathForRoute('shop'));
+      setView('shop');
     }
   }, [isAuthLoading, user, view]);
 
@@ -509,13 +628,82 @@ const App: React.FC = () => {
     openAuthModal(mode, message);
   };
 
-  const goToView = (nextView: AppView) => {
-    if (!user && (nextView === 'cart' || nextView === 'wishlist')) {
-      promptForAuth('login', 'Log in to unlock your synced bag and saved wishlist.', nextView);
+  const updateBrowserPath = (route: AppRoute, replaceHistory = false) => {
+    const nextPath = getPathForRoute(route);
+
+    if (window.location.pathname === nextPath) {
       return;
     }
 
-    setView(user && nextView === 'home' ? 'shop' : nextView);
+    if (replaceHistory) {
+      window.history.replaceState(null, '', nextPath);
+      return;
+    }
+
+    window.history.pushState(null, '', nextPath);
+  };
+
+  const commitViewChange = (
+    nextView: AppView,
+    options: {
+      replaceHistory?: boolean;
+      profileTab?: ProfilePageTab;
+    } = {}
+  ) => {
+    if (nextView === 'profile') {
+      setProfileInitialTab(options.profileTab ?? 'profile');
+    }
+
+    const resolvedView = user && nextView === 'home' ? 'shop' : nextView;
+    setView(resolvedView);
+    updateBrowserPath(resolvedView, options.replaceHistory);
+  };
+
+  const redirectProtectedViewToLogin = (
+    nextView: AppView,
+    message: string,
+    options: {
+      mode?: AuthMode;
+      replaceHistory?: boolean;
+      profileTab?: ProfilePageTab;
+    } = {}
+  ) => {
+    if (nextView === 'profile') {
+      setProfileInitialTab(options.profileTab ?? 'profile');
+    }
+
+    pendingProtectedViewRef.current = nextView;
+    updateBrowserPath('login', options.replaceHistory);
+    openAuthModal(options.mode ?? 'login', message);
+  };
+
+  const goToView = (
+    nextView: AppView,
+    options: {
+      replaceHistory?: boolean;
+      profileTab?: ProfilePageTab;
+    } = {}
+  ) => {
+    if (!user && (nextView === 'cart' || nextView === 'wishlist')) {
+      redirectProtectedViewToLogin(nextView, 'Log in to unlock your synced bag, favorites, and member history.', {
+        replaceHistory: options.replaceHistory,
+      });
+      return;
+    }
+
+    if (!user && nextView === 'profile') {
+      redirectProtectedViewToLogin(
+        'profile',
+        'Log in to open your profile dashboard, order history, and password settings.',
+        {
+          replaceHistory: options.replaceHistory,
+          profileTab: options.profileTab,
+        }
+      );
+      return;
+    }
+
+    commitViewChange(nextView, options);
   };
 
   const upsertCartItem = (product: Product) => {
@@ -545,7 +733,12 @@ const App: React.FC = () => {
 
     upsertCartItem(product);
     setSelectedProduct(product);
-    setView('cart');
+    goToView('cart');
+  };
+
+  const openProductDetail = (product: Product) => {
+    setSelectedProduct(product);
+    commitViewChange('product');
   };
 
   const toggleWishlist = (product: Product) => {
@@ -600,8 +793,8 @@ const App: React.FC = () => {
       skipNextCartSyncRef.current = true;
       setCart([]);
       setCartError(null);
-      alert(`${response.message} Total charged: ${formatPrice(response.orderSummary.total)}`);
-      setView('shop');
+      alert(`${response.message} Total charged: ${formatPrice(response.orderSummary.total)}. Opening your order history.`);
+      goToView('profile', { profileTab: 'orders' });
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Checkout failed.';
       setCartError(message);
@@ -702,13 +895,13 @@ const App: React.FC = () => {
 
               <div className="flex flex-col gap-3 sm:flex-row">
                 <button
-                  onClick={() => setView('shop')}
+                  onClick={() => goToView('shop')}
                   className="rounded-2xl bg-[#102a43] px-7 py-3.5 text-sm font-bold uppercase tracking-[0.12em] text-white transition-all hover:-translate-y-0.5 hover:bg-[#0b1b2f] shadow-lg shadow-slate-900/20"
                 >
                   Start Shopping
                 </button>
                 <button
-                  onClick={() => setView('shop')}
+                  onClick={() => goToView('shop')}
                   className="rounded-2xl border border-[#14b8a6]/40 bg-white/70 px-7 py-3.5 text-sm font-bold uppercase tracking-[0.12em] text-[#0f766e] transition-all hover:-translate-y-0.5 hover:border-[#0f766e] hover:bg-white"
                 >
                   Explore New Drops
@@ -793,7 +986,7 @@ const App: React.FC = () => {
                 <h2 className="mt-2 text-3xl font-black text-[var(--lumina-ink)]">Trending Spotlight</h2>
               </div>
               <button
-                onClick={() => setView('shop')}
+                onClick={() => goToView('shop')}
                 className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-bold text-slate-700 transition-colors hover:border-[#0f766e] hover:text-[#0f766e]"
               >
                 View All
@@ -990,10 +1183,7 @@ const App: React.FC = () => {
             title={`Recommended for ${user.name}`}
             subtitle="Personalized Picks"
             products={personalizedRecommendations}
-            onSelectProduct={(selected) => {
-              setSelectedProduct(selected);
-              setView('product');
-            }}
+            onSelectProduct={openProductDetail}
             onAddToCart={addToCart}
             onBuyNow={handleBuyNow}
           />
@@ -1029,10 +1219,7 @@ const App: React.FC = () => {
               onBuyNow={handleBuyNow}
               onToggleWishlist={toggleWishlist}
               isWishlisted={isWishlisted}
-              onSelectProduct={(selected) => {
-                setSelectedProduct(selected);
-                setView('product');
-              }}
+              onSelectProduct={openProductDetail}
             />
           ))}
         </div>
@@ -1044,7 +1231,7 @@ const App: React.FC = () => {
     if (!selectedProduct) return null;
     return (
       <div className="py-12">
-        <button onClick={() => setView('shop')} className="mb-8 flex items-center text-gray-500 hover:text-indigo-600 transition-colors font-bold group">
+        <button onClick={() => goToView('shop')} className="mb-8 flex items-center text-gray-500 hover:text-indigo-600 transition-colors font-bold group">
           <svg className="h-5 w-5 mr-1 group-hover:-translate-x-1 transition-transform" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
           </svg>
@@ -1205,126 +1392,320 @@ const App: React.FC = () => {
         'Create Account'
       );
     }
+    const featuredCategories = Array.from(new Set(cart.map((item) => item.category))).slice(0, 3);
 
     return (
-      <div className="py-12 max-w-5xl mx-auto">
-      <div className="mb-8 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <h1 className="text-5xl font-extrabold text-gray-900 tracking-tight">Your Shopping Bag</h1>
-        <div className="flex flex-wrap items-center gap-3">
-          <span className="rounded-full border border-white/40 bg-white/60 px-4 py-2 text-xs font-black uppercase tracking-[0.14em] text-gray-700">
-            Account Bag
-          </span>
-          <span className="rounded-full border border-cyan-200 bg-cyan-50 px-4 py-2 text-xs font-black uppercase tracking-[0.14em] text-cyan-700">
-            {isCartLoading ? 'Loading Bag' : isCartSyncing ? 'Syncing Bag' : 'Bag Synced'}
-          </span>
-        </div>
-      </div>
+      <div className="mx-auto max-w-7xl py-10 sm:py-12">
+        <section className="commerce-luxe-panel overflow-hidden rounded-[2.5rem] border border-white/10 px-6 py-8 sm:px-8 lg:px-10">
+          <div className="commerce-surface-grid pointer-events-none absolute inset-0 opacity-70" />
+          <div className="relative grid gap-8 xl:grid-cols-[minmax(0,1.45fr)_360px] xl:items-end">
+            <div className="space-y-6">
+              <span className="inline-flex items-center gap-2 rounded-full border border-cyan-200/20 bg-cyan-200/10 px-4 py-2 text-[11px] font-bold uppercase tracking-[0.32em] text-cyan-50">
+                <ShoppingBag className="h-4 w-4" />
+                Shopping Bag
+              </span>
 
-      {cartError && (
-        <p className="mb-6 rounded-2xl border border-red-200 bg-red-50 px-5 py-4 text-sm font-semibold text-red-600">
-          {cartError}
-        </p>
-      )}
-      
-      {cart.length === 0 ? (
-        <div className="text-center py-32 glass-effect rounded-[3rem] border border-dashed border-gray-300 space-y-8">
-          <div className="flex justify-center">
-            <svg className="h-24 w-24 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 11V7a4 4 0 00-8 0v4M5 9h14l1 12H4L5 9z" />
-            </svg>
+              <div className="space-y-4">
+                <h1 className="max-w-3xl text-4xl font-black tracking-[0.08em] text-white sm:text-5xl lg:text-6xl">
+                  A checkout lane designed to feel as good as the products inside it.
+                </h1>
+                <p className="max-w-2xl text-base leading-7 text-slate-300 sm:text-lg">
+                  Review your saved pieces, fine-tune quantities, and move into checkout with the same premium rhythm as the storefront.
+                </p>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-3">
+                <span className="rounded-full border border-white/10 bg-white/[0.08] px-4 py-2 text-xs font-black uppercase tracking-[0.18em] text-slate-100">
+                  {cartCount} item{cartCount === 1 ? '' : 's'} in bag
+                </span>
+                <span className="rounded-full border border-white/10 bg-white/[0.08] px-4 py-2 text-xs font-black uppercase tracking-[0.18em] text-slate-100">
+                  {wishlistCount} saved look{wishlistCount === 1 ? '' : 's'}
+                </span>
+                <span className="rounded-full border border-cyan-200/25 bg-cyan-200/10 px-4 py-2 text-xs font-black uppercase tracking-[0.18em] text-cyan-50">
+                  {isCartLoading ? 'Loading Bag' : isCartSyncing ? 'Syncing Bag' : 'Bag Synced'}
+                </span>
+              </div>
+
+              {featuredCategories.length > 0 && (
+                <div className="flex flex-wrap gap-2">
+                  {featuredCategories.map((category) => (
+                    <span
+                      key={category}
+                      className="rounded-full border border-white/10 bg-slate-950/45 px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-300"
+                    >
+                      {category}
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div className="grid gap-3 sm:grid-cols-3 xl:grid-cols-1">
+              <div className="commerce-card-surface rounded-[1.9rem] border border-white/10 p-5">
+                <p className="text-[11px] font-bold uppercase tracking-[0.3em] text-cyan-100/70">Bag Total</p>
+                <p className="mt-3 text-3xl font-black text-white">{formatPrice(cartSummary.total)}</p>
+                <p className="mt-2 text-sm text-slate-300">Includes tax with complimentary priority shipping.</p>
+              </div>
+              <div className="commerce-card-surface rounded-[1.9rem] border border-white/10 p-5">
+                <p className="text-[11px] font-bold uppercase tracking-[0.3em] text-cyan-100/70">Delivery Window</p>
+                <p className="mt-3 text-2xl font-black text-white">{cart.length > 0 ? '2-4 days' : 'Standby'}</p>
+                <p className="mt-2 text-sm text-slate-300">Fast, tracked shipping activated at checkout.</p>
+              </div>
+              <div className="commerce-card-surface rounded-[1.9rem] border border-white/10 p-5">
+                <p className="text-[11px] font-bold uppercase tracking-[0.3em] text-cyan-100/70">Member Sync</p>
+                <p className="mt-3 flex items-center gap-2 text-2xl font-black text-white">
+                  <ShieldCheck className="h-5 w-5 text-emerald-300" />
+                  Live
+                </p>
+                <p className="mt-2 text-sm text-slate-300">Your bag is connected to your account across visits.</p>
+              </div>
+            </div>
           </div>
-          <p className="text-3xl font-bold text-gray-400">
-            {isCartLoading ? 'Loading your saved bag...' : 'Your bag is currently empty.'}
+        </section>
+
+        {cartError && (
+          <p className="mt-6 rounded-[1.75rem] border border-red-300/20 bg-red-500/10 px-5 py-4 text-sm font-semibold text-red-100">
+            {cartError}
           </p>
-          {!isCartLoading && (
-            <button 
-              onClick={() => setView('shop')}
-              className="bg-indigo-600 text-white px-12 py-5 rounded-full font-bold text-xl hover:bg-indigo-700 transition-all shadow-xl"
-            >
-              Start Shopping
-            </button>
-          )}
-        </div>
-      ) : (
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-12">
-          <div className="lg:col-span-2 space-y-8">
-            {cart.map(item => (
-              <div key={item.id} className="flex space-x-8 p-6 glass-effect rounded-[2rem] border border-white/50 shadow-sm">
-                <div className="w-32 h-32 rounded-2xl overflow-hidden flex-shrink-0 shadow-md">
-                    <img src={item.image} alt={item.name} loading="lazy" decoding="async" className="w-full h-full object-cover" />
-                </div>
-                <div className="flex-1 flex flex-col justify-between">
-                  <div className="flex justify-between items-start">
-                    <div>
-                      <h3 className="text-xl font-bold text-gray-900">{item.name}</h3>
-                      <p className="text-sm font-semibold text-gray-500 uppercase tracking-widest mt-1">{item.category}</p>
-                    </div>
-                    <button onClick={() => removeFromCart(item.id)} className="text-gray-400 hover:text-red-500 transition-colors">
-                      <svg className="h-6 w-6" viewBox="0 0 20 20" fill="currentColor">
-                        <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
-                      </svg>
-                    </button>
-                  </div>
-                  <div className="flex justify-between items-center mt-4">
-                    <div className="flex items-center border-2 border-gray-100 rounded-xl overflow-hidden bg-white/50">
-                      <button onClick={() => updateQuantity(item.id, -1)} className="px-4 py-2 hover:bg-gray-200 font-bold transition-colors">&minus;</button>
-                      <span className="px-6 font-black text-gray-900">{item.quantity}</span>
-                      <button onClick={() => updateQuantity(item.id, 1)} className="px-4 py-2 hover:bg-gray-200 font-bold transition-colors">+</button>
-                    </div>
-                    <p className="text-2xl font-black text-indigo-600">{formatPrice(item.price * item.quantity)}</p>
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
+        )}
 
-          <div className="space-y-8">
-            <div className="glass-effect p-10 rounded-[2.5rem] border border-indigo-100 space-y-8 shadow-2xl">
-              <h2 className="text-3xl font-bold text-gray-900 tracking-tight">Order Summary</h2>
-              <div className="space-y-5">
-                <div className="flex justify-between text-gray-600 font-medium">
-                  <span>Subtotal</span>
-                  <span>{formatPrice(cartSummary.subtotal)}</span>
+        {cart.length === 0 ? (
+          <section className="commerce-card-surface mt-8 overflow-hidden rounded-[2.5rem] border border-dashed border-white/10 px-6 py-16 text-center sm:px-10 sm:py-20">
+            <div className="mx-auto flex h-24 w-24 items-center justify-center rounded-[2rem] border border-white/10 bg-white/[0.06] text-cyan-100 shadow-[0_24px_40px_-30px_rgba(34,211,238,0.7)]">
+              <ShoppingBag className="h-11 w-11" />
+            </div>
+            <h2 className="mt-8 text-3xl font-black tracking-[0.06em] text-white sm:text-4xl">
+              {isCartLoading ? 'Loading your saved bag...' : 'Your bag is ready for its first standout piece.'}
+            </h2>
+            <p className="mx-auto mt-4 max-w-2xl text-base leading-7 text-slate-300">
+              Add something you love and this space becomes your fast lane to checkout, synced across every visit.
+            </p>
+            {!isCartLoading && (
+              <button
+                type="button"
+                onClick={() => goToView('shop')}
+                className="mt-8 inline-flex items-center gap-2 rounded-full bg-gradient-to-r from-cyan-300 via-sky-300 to-fuchsia-300 px-8 py-4 text-base font-black text-slate-950 shadow-[0_26px_50px_-30px_rgba(103,232,249,0.9)] transition-all duration-300 hover:-translate-y-0.5 hover:shadow-[0_32px_56px_-30px_rgba(236,72,153,0.75)]"
+              >
+                Start Shopping
+                <ArrowRight className="h-5 w-5" />
+              </button>
+            )}
+          </section>
+        ) : (
+          <div className="mt-10 grid gap-8 xl:grid-cols-[minmax(0,1.55fr)_380px]">
+            <div className="space-y-5">
+              {cart.map((item) => {
+                const alreadySaved = isWishlisted(item.id);
+
+                return (
+                  <article
+                    key={item.id}
+                    className="commerce-card-surface relative overflow-hidden rounded-[2.2rem] border border-white/10 p-4 sm:p-5"
+                  >
+                    <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(34,211,238,0.14),transparent_32%),radial-gradient(circle_at_bottom_left,rgba(244,114,182,0.14),transparent_28%)]" />
+                    <div className="relative flex flex-col gap-5 md:flex-row">
+                      <button
+                        type="button"
+                        onClick={() => openProductDetail(item)}
+                        className="group relative h-60 w-full shrink-0 overflow-hidden rounded-[1.75rem] border border-white/10 md:h-44 md:w-44"
+                      >
+                        <img
+                          src={item.image}
+                          alt={item.name}
+                          loading="lazy"
+                          decoding="async"
+                          className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105"
+                        />
+                        <span className="absolute left-3 top-3 rounded-full bg-slate-950/70 px-3 py-1 text-[10px] font-black uppercase tracking-[0.18em] text-white">
+                          {item.location}
+                        </span>
+                      </button>
+
+                      <div className="flex-1 space-y-4">
+                        <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                          <div className="space-y-3">
+                            <div className="flex flex-wrap gap-2">
+                              <span className="rounded-full border border-white/10 bg-white/[0.06] px-3 py-1 text-[10px] font-bold uppercase tracking-[0.2em] text-slate-300">
+                                {item.category}
+                              </span>
+                              {alreadySaved && (
+                                <span className="inline-flex items-center gap-1 rounded-full border border-rose-300/20 bg-rose-400/10 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.2em] text-rose-100">
+                                  <Heart className="h-3.5 w-3.5 fill-current" />
+                                  Wishlisted
+                                </span>
+                              )}
+                            </div>
+                            <div>
+                              <h3 className="text-2xl font-black tracking-tight text-white">{item.name}</h3>
+                              <p className="copy-clamp-2 mt-2 max-w-2xl text-sm leading-6 text-slate-300">{item.description}</p>
+                            </div>
+                          </div>
+
+                          <button
+                            type="button"
+                            onClick={() => removeFromCart(item.id)}
+                            className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-white/10 bg-white/[0.06] text-slate-300 transition-all duration-300 hover:border-red-300/30 hover:bg-red-500/10 hover:text-red-100"
+                            aria-label={`Remove ${item.name} from cart`}
+                          >
+                            <Trash2 className="h-[18px] w-[18px]" />
+                          </button>
+                        </div>
+
+                        <div className="grid gap-3 lg:grid-cols-[auto_auto_1fr] lg:items-end">
+                          <div className="inline-flex items-center rounded-[1.25rem] border border-white/10 bg-white/[0.06] p-1.5 shadow-inner">
+                            <button
+                              type="button"
+                              onClick={() => updateQuantity(item.id, -1)}
+                              className="inline-flex h-11 w-11 items-center justify-center rounded-xl text-slate-200 transition-colors hover:bg-white/[0.08]"
+                              aria-label={`Decrease quantity for ${item.name}`}
+                            >
+                              <Minus className="h-4 w-4" />
+                            </button>
+                            <span className="min-w-[3.5rem] text-center text-xl font-black text-white">{item.quantity}</span>
+                            <button
+                              type="button"
+                              onClick={() => updateQuantity(item.id, 1)}
+                              className="inline-flex h-11 w-11 items-center justify-center rounded-xl text-slate-200 transition-colors hover:bg-white/[0.08]"
+                              aria-label={`Increase quantity for ${item.name}`}
+                            >
+                              <Plus className="h-4 w-4" />
+                            </button>
+                          </div>
+
+                          <div className="rounded-[1.25rem] border border-white/10 bg-white/[0.06] px-4 py-3">
+                            <p className="text-[10px] font-bold uppercase tracking-[0.25em] text-slate-400">Unit price</p>
+                            <p className="mt-2 text-lg font-black text-cyan-100">{formatPrice(item.price)}</p>
+                          </div>
+
+                          <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+                            <div>
+                              <p className="text-[10px] font-bold uppercase tracking-[0.26em] text-slate-400">Line total</p>
+                              <p className="mt-2 text-3xl font-black text-white">{formatPrice(item.price * item.quantity)}</p>
+                            </div>
+
+                            <div className="flex flex-wrap gap-2">
+                              <button
+                                type="button"
+                                onClick={() => openProductDetail(item)}
+                                className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.06] px-4 py-3 text-sm font-semibold text-slate-100 transition-all duration-300 hover:border-white/20 hover:bg-white/[0.1]"
+                              >
+                                View Product
+                                <ArrowRight className="h-4 w-4" />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  if (!alreadySaved) {
+                                    toggleWishlist(item);
+                                  }
+                                }}
+                                disabled={alreadySaved}
+                                className={`inline-flex items-center gap-2 rounded-full px-4 py-3 text-sm font-semibold transition-all duration-300 ${
+                                  alreadySaved
+                                    ? 'cursor-default border border-rose-300/15 bg-rose-400/10 text-rose-100'
+                                    : 'border border-cyan-200/20 bg-cyan-200/10 text-cyan-50 hover:border-cyan-200/40 hover:bg-cyan-200/15'
+                                }`}
+                              >
+                                <Heart className={`h-4 w-4 ${alreadySaved ? 'fill-current' : ''}`} />
+                                {alreadySaved ? 'Saved to Wishlist' : 'Save for Later'}
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </article>
+                );
+              })}
+            </div>
+
+            <aside className="space-y-5 xl:sticky xl:top-28 xl:self-start">
+              <div className="commerce-card-surface rounded-[2.2rem] border border-white/10 p-6 sm:p-7">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <p className="text-[11px] font-bold uppercase tracking-[0.32em] text-cyan-100/70">Order Summary</p>
+                    <h2 className="mt-3 text-3xl font-black tracking-tight text-white">Ready for checkout</h2>
+                  </div>
+                  <span className="inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-cyan-200/10 text-cyan-100">
+                    <CreditCard className="h-5 w-5" />
+                  </span>
                 </div>
-                <div className="flex justify-between text-gray-600 font-medium">
-                  <span>Priority Shipping</span>
-                  <span className="text-green-600 font-bold uppercase text-sm">Complimentary</span>
+
+                <div className="mt-8 space-y-4">
+                  <div className="flex items-center justify-between text-sm font-medium text-slate-300">
+                    <span>Subtotal</span>
+                    <span>{formatPrice(cartSummary.subtotal)}</span>
+                  </div>
+                  <div className="flex items-center justify-between text-sm font-medium text-slate-300">
+                    <span>Priority shipping</span>
+                    <span className="font-black uppercase tracking-[0.18em] text-emerald-300">Complimentary</span>
+                  </div>
+                  <div className="flex items-center justify-between text-sm font-medium text-slate-300">
+                    <span>Tax</span>
+                    <span>{formatPrice(cartSummary.tax)}</span>
+                  </div>
+                  <div className="flex items-center justify-between rounded-[1.4rem] border border-white/10 bg-white/[0.06] px-4 py-4 text-base font-black text-white">
+                    <span>Total</span>
+                    <span>{formatPrice(cartSummary.total)}</span>
+                  </div>
                 </div>
-                <div className="flex justify-between text-gray-600 font-medium">
-                  <span>Tax</span>
-                  <span>{formatPrice(cartSummary.tax)}</span>
-                </div>
-                <div className="pt-6 border-t border-gray-200 flex justify-between font-black text-3xl text-gray-900">
-                  <span>Total</span>
-                  <span>{formatPrice(cartSummary.total)}</span>
+
+                <button
+                  type="button"
+                  onClick={handleCheckout}
+                  disabled={isCheckoutLoading || isCartLoading}
+                  className={`mt-8 inline-flex w-full items-center justify-center gap-3 rounded-[1.5rem] bg-gradient-to-r from-cyan-300 via-sky-300 to-fuchsia-300 px-5 py-4 text-lg font-black text-slate-950 shadow-[0_24px_46px_-30px_rgba(103,232,249,0.95)] transition-all duration-300 hover:-translate-y-0.5 hover:shadow-[0_30px_52px_-30px_rgba(236,72,153,0.78)] ${(isCheckoutLoading || isCartLoading) ? 'opacity-70' : ''}`}
+                >
+                  {isCheckoutLoading || isCartLoading ? (
+                    <div className="h-7 w-7 rounded-full border-4 border-slate-950/20 border-t-slate-950 animate-spin" />
+                  ) : (
+                    <>
+                      <Sparkles className="h-5 w-5" />
+                      Checkout Now
+                    </>
+                  )}
+                </button>
+
+                <p className="mt-4 text-sm leading-6 text-slate-300">
+                  Secure checkout, fast shipping, and account-synced updates from the moment you place your order.
+                </p>
+              </div>
+
+              <div className="commerce-card-surface rounded-[2.2rem] border border-white/10 p-6">
+                <p className="text-[11px] font-bold uppercase tracking-[0.32em] text-cyan-100/70">Member Perks</p>
+                <div className="mt-5 space-y-4">
+                  <div className="flex items-start gap-3">
+                    <span className="mt-0.5 inline-flex h-10 w-10 items-center justify-center rounded-2xl bg-cyan-200/10 text-cyan-100">
+                      <Truck className="h-[18px] w-[18px]" />
+                    </span>
+                    <div>
+                      <p className="font-semibold text-white">Priority shipping included</p>
+                      <p className="mt-1 text-sm text-slate-300">Every bag is staged for fast dispatch at no extra cost.</p>
+                    </div>
+                  </div>
+                  <div className="flex items-start gap-3">
+                    <span className="mt-0.5 inline-flex h-10 w-10 items-center justify-center rounded-2xl bg-cyan-200/10 text-cyan-100">
+                      <ShieldCheck className="h-[18px] w-[18px]" />
+                    </span>
+                    <div>
+                      <p className="font-semibold text-white">Protected payment flow</p>
+                      <p className="mt-1 text-sm text-slate-300">Account-backed sync keeps your bag ready across sessions.</p>
+                    </div>
+                  </div>
+                  <div className="flex items-start gap-3">
+                    <span className="mt-0.5 inline-flex h-10 w-10 items-center justify-center rounded-2xl bg-cyan-200/10 text-cyan-100">
+                      <Heart className="h-[18px] w-[18px]" />
+                    </span>
+                    <div>
+                      <p className="font-semibold text-white">Style memory built in</p>
+                      <p className="mt-1 text-sm text-slate-300">Keep favorites close with wishlist save-for-later actions.</p>
+                    </div>
+                  </div>
                 </div>
               </div>
-              <button 
-                onClick={handleCheckout}
-                disabled={isCheckoutLoading || isCartLoading}
-                className={`w-full bg-indigo-600 text-white py-5 rounded-[1.5rem] font-bold text-xl hover:bg-indigo-700 transition-all flex items-center justify-center space-x-3 shadow-xl shadow-indigo-200 ${(isCheckoutLoading || isCartLoading) ? 'opacity-70' : ''}`}
-              >
-                {isCheckoutLoading || isCartLoading ? (
-                  <div className="w-8 h-8 border-4 border-white/30 border-t-white rounded-full animate-spin"></div>
-                ) : (
-                  <>
-                    <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M13 10V3L4 14h7v7l9-11h-7z" />
-                    </svg>
-                    <span>Checkout Now</span>
-                  </>
-                )}
-              </button>
-            </div>
-            
-            <div className="flex items-center justify-center space-x-8 text-gray-400 opacity-60">
-              <img src="https://cdn-icons-png.flaticon.com/512/196/196578.png" alt="Visa" className="h-8 grayscale hover:grayscale-0 transition-all cursor-pointer" />
-              <img src="https://cdn-icons-png.flaticon.com/512/349/349228.png" alt="Mastercard" className="h-8 grayscale hover:grayscale-0 transition-all cursor-pointer" />
-              <img src="https://cdn-icons-png.flaticon.com/512/174/174861.png" alt="Paypal" className="h-8 grayscale hover:grayscale-0 transition-all cursor-pointer" />
-            </div>
+            </aside>
           </div>
-        </div>
-      )}
+        )}
       </div>
     );
   };
@@ -1339,82 +1720,226 @@ const App: React.FC = () => {
         'Sign Up for Deals'
       );
     }
+    const featuredLocations = Array.from(new Set(wishlist.map((item) => item.location))).slice(0, 3);
 
     return (
-      <div className="py-12 max-w-6xl mx-auto">
-      <div className="flex items-center justify-between gap-4 mb-10">
-        <div className="space-y-3">
-          <h1 className="text-5xl font-extrabold text-gray-900 tracking-tight">Your Wishlist</h1>
-          {wishlistError && (
-            <p className="rounded-2xl border border-red-200 bg-red-50 px-5 py-3 text-sm font-semibold text-red-600">
-              {wishlistError}
-            </p>
-          )}
-        </div>
-        <div className="flex flex-wrap items-center gap-3">
-          <span className="rounded-full bg-pink-500 px-4 py-2 text-xs font-black uppercase tracking-[0.14em] text-white">
-            {wishlistCount} Saved
-          </span>
-          <span className="rounded-full border border-pink-200 bg-pink-50 px-4 py-2 text-xs font-black uppercase tracking-[0.14em] text-pink-700">
-            {isWishlistLoading ? 'Loading Wishlist' : isWishlistSyncing ? 'Syncing Wishlist' : 'Wishlist Synced'}
-          </span>
-        </div>
-      </div>
+      <div className="mx-auto max-w-7xl py-10 sm:py-12">
+        <section className="commerce-luxe-panel overflow-hidden rounded-[2.5rem] border border-white/10 px-6 py-8 sm:px-8 lg:px-10">
+          <div className="commerce-surface-grid pointer-events-none absolute inset-0 opacity-70" />
+          <div className="relative grid gap-8 xl:grid-cols-[minmax(0,1.45fr)_360px] xl:items-end">
+            <div className="space-y-6">
+              <span className="inline-flex items-center gap-2 rounded-full border border-rose-300/20 bg-rose-400/10 px-4 py-2 text-[11px] font-bold uppercase tracking-[0.32em] text-rose-100">
+                <Heart className="h-4 w-4 fill-current" />
+                Wishlist
+              </span>
 
-      {wishlist.length === 0 ? (
-        <div className="text-center py-28 glass-effect rounded-[3rem] border border-dashed border-gray-300 space-y-8">
-          <div className="flex justify-center">
-            <svg className="h-20 w-20 text-pink-300" viewBox="0 0 20 20" fill="currentColor">
-              <path d="M3.172 5.172a4 4 0 015.656 0L10 6.343l1.172-1.171a4 4 0 115.656 5.656L10 17.657l-6.828-6.829a4 4 0 010-5.656z" />
-            </svg>
-          </div>
-          <p className="text-3xl font-bold text-gray-400">No items in your wishlist yet.</p>
-          <button
-            onClick={() => setView('shop')}
-            className="bg-indigo-600 text-white px-10 py-4 rounded-full font-bold text-lg hover:bg-indigo-700 transition-all shadow-xl"
-          >
-            Explore Products
-          </button>
-        </div>
-      ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-8">
-          {wishlist.map(item => (
-            <article key={item.id} className="glass-effect rounded-[2rem] border border-white/60 p-5 shadow-xl space-y-5">
-              <div className="relative overflow-hidden rounded-2xl bg-white/30">
-                <img src={item.image} alt={item.name} loading="lazy" decoding="async" className="h-56 w-full object-cover" />
-                <span className="absolute left-3 top-3 rounded-full bg-black/60 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.12em] text-white">
-                  {item.category}
+              <div className="space-y-4">
+                <h1 className="max-w-3xl text-4xl font-black tracking-[0.08em] text-white sm:text-5xl lg:text-6xl">
+                  Save the pieces that deserve a second look, then move on them when the moment feels right.
+                </h1>
+                <p className="max-w-2xl text-base leading-7 text-slate-300 sm:text-lg">
+                  Your wishlist is your private moodboard for standout picks, synced to your account and always ready to convert into the bag.
+                </p>
+              </div>
+
+              {wishlistError && (
+                <p className="rounded-[1.5rem] border border-red-300/20 bg-red-500/10 px-5 py-4 text-sm font-semibold text-red-100">
+                  {wishlistError}
+                </p>
+              )}
+
+              <div className="flex flex-wrap items-center gap-3">
+                <span className="rounded-full border border-white/10 bg-white/[0.08] px-4 py-2 text-xs font-black uppercase tracking-[0.18em] text-slate-100">
+                  {wishlistCount} saved
+                </span>
+                <span className="rounded-full border border-white/10 bg-white/[0.08] px-4 py-2 text-xs font-black uppercase tracking-[0.18em] text-slate-100">
+                  {cartCount} in bag
+                </span>
+                <span className="rounded-full border border-rose-300/20 bg-rose-400/10 px-4 py-2 text-xs font-black uppercase tracking-[0.18em] text-rose-100">
+                  {isWishlistLoading ? 'Loading Wishlist' : isWishlistSyncing ? 'Syncing Wishlist' : 'Wishlist Synced'}
                 </span>
               </div>
 
-              <div className="space-y-2">
-                <h3 className="text-xl font-bold text-gray-900">{item.name}</h3>
-                <p className="text-sm text-gray-500 line-clamp-2">{item.description}</p>
-                <p className="text-2xl font-black text-indigo-400">{formatPrice(item.price)}</p>
-              </div>
+              {featuredLocations.length > 0 && (
+                <div className="flex flex-wrap gap-2">
+                  {featuredLocations.map((location) => (
+                    <span
+                      key={location}
+                      className="rounded-full border border-white/10 bg-slate-950/45 px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-300"
+                    >
+                      {location}
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
 
-              <div className="grid grid-cols-2 gap-3">
-                <button
-                  onClick={() => {
-                    addToCart(item);
-                    removeFromWishlist(item.id);
-                  }}
-                  className="rounded-xl bg-indigo-600 text-white py-3 text-sm font-bold hover:bg-indigo-700 transition-colors"
-                >
-                  Add to Cart
-                </button>
-                <button
-                  onClick={() => removeFromWishlist(item.id)}
-                  className="rounded-xl border border-pink-300 py-3 text-sm font-bold text-pink-400 hover:bg-pink-500 hover:text-white transition-colors"
-                >
-                  Remove
-                </button>
+            <div className="grid gap-3 sm:grid-cols-3 xl:grid-cols-1">
+              <div className="commerce-card-surface rounded-[1.9rem] border border-white/10 p-5">
+                <p className="text-[11px] font-bold uppercase tracking-[0.3em] text-rose-100/70">Saved Now</p>
+                <p className="mt-3 text-3xl font-black text-white">{wishlistCount}</p>
+                <p className="mt-2 text-sm text-slate-300">A sharp shortlist of products worth revisiting.</p>
               </div>
-            </article>
-          ))}
-        </div>
-      )}
+              <div className="commerce-card-surface rounded-[1.9rem] border border-white/10 p-5">
+                <p className="text-[11px] font-bold uppercase tracking-[0.3em] text-rose-100/70">Ready to Move</p>
+                <p className="mt-3 text-2xl font-black text-white">{formatPrice(wishlist.reduce((sum, item) => sum + item.price, 0))}</p>
+                <p className="mt-2 text-sm text-slate-300">The full value of your saved collection at a glance.</p>
+              </div>
+              <div className="commerce-card-surface rounded-[1.9rem] border border-white/10 p-5">
+                <p className="text-[11px] font-bold uppercase tracking-[0.3em] text-rose-100/70">Style Radar</p>
+                <p className="mt-3 flex items-center gap-2 text-2xl font-black text-white">
+                  <Sparkles className="h-5 w-5 text-rose-200" />
+                  Curated
+                </p>
+                <p className="mt-2 text-sm text-slate-300">Your favorite looks are always one click away from the bag.</p>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        {wishlist.length === 0 ? (
+          <section className="commerce-card-surface mt-8 overflow-hidden rounded-[2.5rem] border border-dashed border-white/10 px-6 py-16 text-center sm:px-10 sm:py-20">
+            <div className="mx-auto flex h-24 w-24 items-center justify-center rounded-[2rem] border border-white/10 bg-white/[0.06] text-rose-100 shadow-[0_24px_42px_-30px_rgba(244,114,182,0.75)]">
+              <Heart className="h-11 w-11 fill-current" />
+            </div>
+            <h2 className="mt-8 text-3xl font-black tracking-[0.06em] text-white sm:text-4xl">
+              {isWishlistLoading ? 'Loading your saved pieces...' : 'Your wishlist is waiting for its first obsession.'}
+            </h2>
+            <p className="mx-auto mt-4 max-w-2xl text-base leading-7 text-slate-300">
+              Save the products that stand out now, then come back when you are ready to move them into your bag.
+            </p>
+            {!isWishlistLoading && (
+              <button
+                type="button"
+                onClick={() => goToView('shop')}
+                className="mt-8 inline-flex items-center gap-2 rounded-full bg-gradient-to-r from-cyan-300 via-sky-300 to-fuchsia-300 px-8 py-4 text-base font-black text-slate-950 shadow-[0_26px_50px_-30px_rgba(103,232,249,0.9)] transition-all duration-300 hover:-translate-y-0.5 hover:shadow-[0_32px_56px_-30px_rgba(236,72,153,0.75)]"
+              >
+                Explore Products
+                <ArrowRight className="h-5 w-5" />
+              </button>
+            )}
+          </section>
+        ) : (
+          <div className="mt-10 grid gap-6 md:grid-cols-2 xl:grid-cols-3">
+            {wishlist.map((item) => {
+              const isInBag = cart.some((cartItem) => cartItem.id === item.id);
+
+              return (
+                <article
+                  key={item.id}
+                  className="commerce-card-surface group relative overflow-hidden rounded-[2.2rem] border border-white/10 p-4"
+                >
+                  <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(244,114,182,0.14),transparent_30%),radial-gradient(circle_at_bottom_right,rgba(34,211,238,0.12),transparent_30%)]" />
+                  <div className="relative space-y-5">
+                    <button
+                      type="button"
+                      onClick={() => openProductDetail(item)}
+                      className="relative block h-72 w-full overflow-hidden rounded-[1.8rem] border border-white/10"
+                    >
+                      <img
+                        src={item.image}
+                        alt={item.name}
+                        loading="lazy"
+                        decoding="async"
+                        className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105"
+                      />
+                      <div className="absolute inset-x-0 top-0 flex items-start justify-between gap-3 p-4">
+                        <span className="rounded-full bg-slate-950/70 px-3 py-1 text-[10px] font-black uppercase tracking-[0.18em] text-white">
+                          {item.category}
+                        </span>
+                        <span className="rounded-full border border-white/10 bg-white/[0.12] px-3 py-1 text-[10px] font-black uppercase tracking-[0.18em] text-white">
+                          {item.location}
+                        </span>
+                      </div>
+                      <div className="absolute inset-x-0 bottom-0 p-4">
+                        <div className="rounded-[1.25rem] border border-white/10 bg-slate-950/65 px-4 py-3 backdrop-blur-sm">
+                          <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-300">Curated Price</p>
+                          <p className="mt-1 text-2xl font-black text-white">{formatPrice(item.price)}</p>
+                        </div>
+                      </div>
+                    </button>
+
+                    <div className="space-y-4">
+                      <div className="flex items-start justify-between gap-4">
+                        <div>
+                          <h3 className="text-2xl font-black tracking-tight text-white">{item.name}</h3>
+                          <p className="copy-clamp-2 mt-2 text-sm leading-6 text-slate-300">{item.description}</p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => removeFromWishlist(item.id)}
+                          className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-white/10 bg-white/[0.06] text-slate-300 transition-all duration-300 hover:border-red-300/30 hover:bg-red-500/10 hover:text-red-100"
+                          aria-label={`Remove ${item.name} from wishlist`}
+                        >
+                          <Trash2 className="h-[18px] w-[18px]" />
+                        </button>
+                      </div>
+
+                      {isInBag && (
+                        <div className="inline-flex items-center gap-2 rounded-full border border-cyan-200/20 bg-cyan-200/10 px-4 py-2 text-[11px] font-bold uppercase tracking-[0.18em] text-cyan-50">
+                          <ShoppingBag className="h-4 w-4" />
+                          Already in bag
+                        </div>
+                      )}
+
+                      <div className="grid gap-2">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            addToCart(item);
+                            removeFromWishlist(item.id);
+                          }}
+                          className="inline-flex items-center justify-center gap-2 rounded-[1.3rem] bg-gradient-to-r from-cyan-300 via-sky-300 to-fuchsia-300 px-5 py-4 text-sm font-black text-slate-950 shadow-[0_22px_42px_-30px_rgba(103,232,249,0.95)] transition-all duration-300 hover:-translate-y-0.5 hover:shadow-[0_28px_46px_-30px_rgba(236,72,153,0.75)]"
+                        >
+                          {isInBag ? 'Add One More to Bag' : 'Move to Bag'}
+                          <ArrowRight className="h-4 w-4" />
+                        </button>
+
+                        <div className="grid grid-cols-2 gap-2">
+                          <button
+                            type="button"
+                            onClick={() => openProductDetail(item)}
+                            className="rounded-[1.2rem] border border-white/10 bg-white/[0.06] px-4 py-3 text-sm font-semibold text-slate-100 transition-all duration-300 hover:border-white/20 hover:bg-white/[0.1]"
+                          >
+                            View Item
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => removeFromWishlist(item.id)}
+                            className="rounded-[1.2rem] border border-rose-300/20 bg-rose-400/10 px-4 py-3 text-sm font-semibold text-rose-100 transition-all duration-300 hover:border-rose-300/40 hover:bg-rose-400/15"
+                          >
+                            Remove
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </article>
+              );
+            })}
+          </div>
+        )}
       </div>
+    );
+  };
+
+  const renderProfile = () => {
+    if (!user) {
+      return renderProtectedAccessPanel(
+        'Member Access',
+        'Sign in to view your profile dashboard.',
+        'Access your profile details, order history, and password controls from one secure account page.',
+        'Login',
+        'Create account'
+      );
+    }
+
+    return (
+      <ProfilePage
+        user={user}
+        initialTab={profileInitialTab}
+        onBrowseShop={() => goToView('shop')}
+      />
     );
   };
 
@@ -1517,8 +2042,10 @@ const App: React.FC = () => {
         onLogin={() => promptForAuth('login', 'Login to unlock the full shopping experience.')}
         onRegister={() => promptForAuth('register', 'Create your account to unlock premium deals and checkout.')}
         onGoogle={handleGoogleAuth}
+        onProfileClick={() => goToView('profile')}
         onLogout={() => {
           pendingProtectedViewRef.current = null;
+          updateBrowserPath('home', true);
           logoutUser();
           setView('home');
         }}
@@ -1530,6 +2057,7 @@ const App: React.FC = () => {
         {currentView === 'product' && renderProductDetails()}
         {currentView === 'cart' && renderCart()}
         {currentView === 'wishlist' && renderWishlist()}
+        {currentView === 'profile' && renderProfile()}
         {currentView === 'admin' && canAccessAdmin && renderAdmin()}
         {currentView === 'admin' && !canAccessAdmin && (
           <div className="py-20 text-center">
@@ -1555,6 +2083,10 @@ const App: React.FC = () => {
         errorMessage={authError}
         contextMessage={authPromptMessage}
         onClose={() => {
+          if (window.location.pathname === getPathForRoute('login')) {
+            updateBrowserPath(user ? currentView : 'home', true);
+          }
+
           pendingProtectedViewRef.current = null;
           closeAuthModal();
         }}

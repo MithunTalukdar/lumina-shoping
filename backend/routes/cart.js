@@ -1,5 +1,6 @@
 const express = require("express");
 
+const Order = require("../models/Order");
 const User = require("../models/User");
 const { requireAuth } = require("../middleware/auth");
 const { products } = require("../data/products");
@@ -80,6 +81,20 @@ function buildCartResponse(cartItems) {
   };
 }
 
+function buildOrderItems(items) {
+  return items.map((item) => ({
+    productId: item.id,
+    name: item.name,
+    description: item.description,
+    image: item.image,
+    category: item.category,
+    location: item.location,
+    price: item.price,
+    quantity: item.quantity,
+    lineTotal: item.price * item.quantity,
+  }));
+}
+
 async function loadUser(userId) {
   return User.findById(userId);
 }
@@ -129,6 +144,16 @@ router.post("/checkout", requireAuth, async (req, res) => {
       return res.status(400).json({ message: "Cart is empty." });
     }
 
+    const order = await Order.create({
+      userId: user._id,
+      items: buildOrderItems(cartResponse.items),
+      subtotal: cartResponse.summary.subtotal,
+      shipping: cartResponse.summary.shipping,
+      tax: cartResponse.summary.tax,
+      total: cartResponse.summary.total,
+      status: "pending",
+    });
+
     user.cartItems = [];
     await user.save();
 
@@ -136,6 +161,7 @@ router.post("/checkout", requireAuth, async (req, res) => {
       message: "Order placed successfully.",
       orderSummary: cartResponse.summary,
       items: cartResponse.items,
+      orderId: order._id.toString(),
     });
   } catch (error) {
     return res.status(500).json({ message: "Checkout failed." });

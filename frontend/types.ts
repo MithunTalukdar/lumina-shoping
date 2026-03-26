@@ -25,13 +25,30 @@ export interface User {
   role: 'user' | 'admin';
 }
 
+export type OrderStatus = 'pending' | 'delivered' | 'cancelled';
+
+export interface OrderItem {
+  productId: string;
+  name: string;
+  description: string;
+  image: string;
+  category: string;
+  location: Product['location'];
+  price: number;
+  quantity: number;
+  lineTotal: number;
+}
+
 export interface Order {
   id: string;
   userId: string;
-  items: CartItem[];
+  items: OrderItem[];
+  subtotal: number;
+  shipping: number;
+  tax: number;
   total: number;
-  status: 'pending' | 'shipped' | 'delivered';
+  status: OrderStatus;
   createdAt: string;
 }
 
-export type AppView = 'home' | 'shop' | 'product' | 'cart' | 'wishlist' | 'admin' | 'orders';
+export type AppView = 'home' | 'shop' | 'product' | 'cart' | 'wishlist' | 'profile' | 'admin';
