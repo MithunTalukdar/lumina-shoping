@@ -16,6 +16,7 @@ import { Product, CartItem, AppView } from './types';
 import { INITIAL_PRODUCTS } from './constants';
 import FilterBar from './components/FilterBar';
 import Navbar from './components/Navbar';
+import ProductCard from './components/ProductCard';
 import ProductSection from './components/ProductSection';
 import ProfilePage, { type ProfilePageTab } from './components/ProfilePage';
 import ShoppingAssistant from './components/ShoppingAssistant';
@@ -67,6 +68,7 @@ const SHOP_SECTIONS = [
 
 const SECTION_PAGE_SIZE = 8;
 const SECTION_PAGE_STEP = 4;
+const SEARCH_RESULTS_SKELETON_COUNT = 8;
 
 type AppRoute = AppView | 'login';
 
@@ -125,6 +127,24 @@ const isStorefrontProduct = (item: Product) =>
   (item.location === 'India' || item.location === 'NRI' || item.location === 'Dhaka') &&
   typeof item.category === 'string' &&
   item.category.length > 0;
+
+const matchesProductSearch = (product: Product, query: string) => {
+  const normalizedQuery = query.trim().toLowerCase();
+
+  if (!normalizedQuery) {
+    return true;
+  }
+
+  return (
+    product.name.toLowerCase().includes(normalizedQuery) ||
+    product.description.toLowerCase().includes(normalizedQuery) ||
+    product.category.toLowerCase().includes(normalizedQuery) ||
+    product.gender.toLowerCase().includes(normalizedQuery) ||
+    product.type.toLowerCase().includes(normalizedQuery) ||
+    product.location.toLowerCase().includes(normalizedQuery) ||
+    `${product.gender} ${product.type}`.toLowerCase().includes(normalizedQuery)
+  );
+};
 
 const buildCartSummary = (items: CartItem[]) => {
   const subtotal = items.reduce((sum, item) => sum + item.price * item.quantity, 0);
@@ -202,6 +222,9 @@ const App: React.FC = () => {
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
   const [isCheckoutLoading, setIsCheckoutLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [searchResults, setSearchResults] = useState<Product[]>([]);
+  const [isSearchResultsLoading, setIsSearchResultsLoading] = useState(false);
+  const [searchResultsSource, setSearchResultsSource] = useState<'api' | 'fallback'>('fallback');
   const [selectedLocation, setSelectedLocation] = useState<LocationFilter>('All');
   const [isProductsLoading, setIsProductsLoading] = useState(false);
   const [productsSource, setProductsSource] = useState<'api' | 'fallback'>('fallback');
@@ -218,6 +241,8 @@ const App: React.FC = () => {
   const skipNextCartSyncRef = useRef(false);
   const skipNextWishlistSyncRef = useRef(false);
   const pendingProtectedViewRef = useRef<AppView | null>(null);
+  const normalizedSearchQuery = searchQuery.trim();
+  const isSearchMode = normalizedSearchQuery.length > 0;
 
   useEffect(() => {
     let mounted = true;
@@ -349,7 +374,7 @@ const App: React.FC = () => {
 
   useEffect(() => {
     setVisibleCounts(createInitialVisibleCounts());
-  }, [searchQuery, selectedLocation]);
+  }, [selectedLocation]);
 
   useEffect(() => {
     if (isAuthLoading || user) {
@@ -580,29 +605,65 @@ const App: React.FC = () => {
     [products]
   );
 
-  const filteredProducts = useMemo(() => {
-    const normalizedQuery = searchQuery.toLowerCase().trim();
+  useEffect(() => {
+    if (!isSearchMode) {
+      setSearchResults([]);
+      setIsSearchResultsLoading(false);
+      setSearchResultsSource('fallback');
+      return;
+    }
 
-    return shopProducts.filter(p => {
-      const matchesSearch =
-        normalizedQuery.length === 0 ||
-        p.name.toLowerCase().includes(normalizedQuery) ||
-        p.category.toLowerCase().includes(normalizedQuery) ||
-        p.gender.toLowerCase().includes(normalizedQuery) ||
-        p.type.toLowerCase().includes(normalizedQuery) ||
-        p.location.toLowerCase().includes(normalizedQuery) ||
-        p.description.toLowerCase().includes(normalizedQuery) ||
-        `${p.gender} ${p.type}`.includes(normalizedQuery);
+    let mounted = true;
+    const controller = new AbortController();
+    setIsSearchResultsLoading(true);
+    setSearchResults([]);
 
-      return matchesSearch;
-    });
-  }, [shopProducts, searchQuery]);
+    const searchTimeoutId = window.setTimeout(async () => {
+      try {
+        const apiProducts = await getProducts({
+          location: selectedLocation !== 'All' ? selectedLocation : undefined,
+          q: normalizedSearchQuery,
+          signal: controller.signal,
+        });
+
+        if (!mounted) {
+          return;
+        }
+
+        const normalizedResults = apiProducts.filter(isStorefrontProduct);
+        const fallbackResults = shopProducts.filter((product) => matchesProductSearch(product, normalizedSearchQuery));
+        const resolvedResults = normalizedResults.length === 0 && fallbackResults.length > 0 ? fallbackResults : normalizedResults;
+
+        setSearchResults(resolvedResults);
+        setSearchResultsSource(resolvedResults === normalizedResults ? 'api' : 'fallback');
+      } catch (error) {
+        if (!mounted || controller.signal.aborted) {
+          return;
+        }
+
+        console.error('Search API unavailable, using local catalog results:', error);
+        setSearchResults(shopProducts.filter((product) => matchesProductSearch(product, normalizedSearchQuery)));
+        setSearchResultsSource('fallback');
+      } finally {
+        if (mounted) {
+          setIsSearchResultsLoading(false);
+        }
+      }
+    }, 220);
+
+    return () => {
+      mounted = false;
+      controller.abort();
+      window.clearTimeout(searchTimeoutId);
+    };
+  }, [isSearchMode, normalizedSearchQuery, selectedLocation, shopProducts]);
 
   const cartSummary = useMemo(() => buildCartSummary(cart), [cart]);
   const cartCount = useMemo(() => cart.reduce((acc, item) => acc + item.quantity, 0), [cart]);
   const wishlistCount = useMemo(() => wishlist.length, [wishlist]);
   const canAccessAdmin = user?.role === 'admin';
   const currentView = user && view === 'home' ? 'shop' : view;
+  const isShopSearchMode = currentView === 'shop' && isSearchMode;
   const personalizedRecommendations = useMemo(() => {
     if (!user) {
       return [];
@@ -610,16 +671,16 @@ const App: React.FC = () => {
 
     const seedCategory = wishlist[0]?.category || cart[0]?.category;
     const excludedIds = new Set([...wishlist.map((item) => item.id), ...cart.map((item) => item.id)]);
-    const preferredPool = filteredProducts.filter((product) =>
+    const preferredPool = shopProducts.filter((product) =>
       product.category === seedCategory && !excludedIds.has(product.id)
     );
-    const fallbackPool = filteredProducts.filter((product) => !excludedIds.has(product.id));
+    const fallbackPool = shopProducts.filter((product) => !excludedIds.has(product.id));
     const sortedPool = [...(preferredPool.length > 0 ? preferredPool : fallbackPool)].sort(
       (left, right) => right.rating * 100 + right.reviewsCount - (left.rating * 100 + left.reviewsCount)
     );
 
     return sortedPool.slice(0, 3);
-  }, [user, wishlist, cart, filteredProducts]);
+  }, [user, wishlist, cart, shopProducts]);
 
   // Handlers
   const promptForAuth = (mode: AuthMode, message: string, nextView?: AppView) => {
@@ -1030,199 +1091,305 @@ const App: React.FC = () => {
     );
   };
 
+  const renderSearchResults = () => {
+    const locationLabel = selectedLocation === 'All' ? 'All Regions' : selectedLocation;
+    const searchSourceLabel = isSearchResultsLoading
+      ? 'Searching Feed'
+      : searchResultsSource === 'api'
+      ? 'Live Search'
+      : 'Fallback Search';
+
+    return (
+      <section className="commerce-luxe-panel search-mode-enter relative overflow-hidden rounded-[2.6rem] border border-white/10 px-5 py-6 shadow-2xl sm:px-6 sm:py-8 lg:px-8">
+        <div className="commerce-surface-grid pointer-events-none absolute inset-0 opacity-55" />
+        <div className="pointer-events-none absolute -left-14 top-8 h-44 w-44 rounded-full bg-cyan-400/20 blur-3xl" />
+        <div className="pointer-events-none absolute right-0 top-0 h-56 w-56 rounded-full bg-rose-400/15 blur-3xl" />
+        <div className="pointer-events-none absolute bottom-0 left-1/3 h-44 w-44 rounded-full bg-amber-300/10 blur-3xl" />
+
+        <div className="relative space-y-6">
+          <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
+            <div className="space-y-4">
+              <span className="inline-flex items-center rounded-full border border-cyan-300/20 bg-cyan-300/10 px-4 py-1.5 text-[11px] font-black uppercase tracking-[0.2em] text-cyan-100">
+                Search Mode Active
+              </span>
+
+              <div className="space-y-2">
+                <h1 className="text-3xl font-black tracking-tight text-white sm:text-4xl lg:text-5xl">
+                  {isSearchResultsLoading
+                    ? `Searching for "${normalizedSearchQuery}"`
+                    : searchResults.length > 0
+                    ? `${searchResults.length} results for "${normalizedSearchQuery}"`
+                    : `No results for "${normalizedSearchQuery}"`}
+                </h1>
+                <p className="max-w-3xl text-sm font-medium leading-relaxed text-slate-300 sm:text-base">
+                  Matching products take over the page here so shoppers can stay focused. Clear the query anytime to restore the
+                  full storefront layout.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-3">
+              <span className="inline-flex items-center rounded-full border border-white/10 bg-white/5 px-4 py-2 text-xs font-black uppercase tracking-[0.16em] text-slate-100">
+                {locationLabel}
+              </span>
+              <span className="inline-flex items-center rounded-full border border-white/10 bg-white/5 px-4 py-2 text-xs font-black uppercase tracking-[0.16em] text-slate-100">
+                {searchSourceLabel}
+              </span>
+            </div>
+          </div>
+
+          {isSearchResultsLoading ? (
+            <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
+              {Array.from({ length: SEARCH_RESULTS_SKELETON_COUNT }).map((_, index) => (
+                <div
+                  key={`search-result-skeleton-${index}`}
+                  className="overflow-hidden rounded-[2rem] border border-white/10 bg-slate-950/55 animate-pulse"
+                >
+                  <div className="aspect-[4/4.8] bg-slate-800/80" />
+                  <div className="space-y-4 p-5">
+                    <div className="h-3 w-20 rounded-full bg-slate-700/80" />
+                    <div className="h-6 w-3/4 rounded-full bg-slate-700/80" />
+                    <div className="h-4 w-full rounded-full bg-slate-800/80" />
+                    <div className="h-4 w-5/6 rounded-full bg-slate-800/80" />
+                    <div className="h-12 rounded-[1.1rem] bg-slate-700/80" />
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : searchResults.length === 0 ? (
+            <div className="rounded-[2rem] border border-dashed border-white/15 bg-slate-950/35 px-6 py-20 text-center">
+              <h2 className="text-2xl font-black text-white">No results found</h2>
+              <p className="mt-3 text-base font-medium leading-relaxed text-slate-400">
+                Try a different keyword, broaden the location filter, or clear the search to return to the full catalog experience.
+              </p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
+              {searchResults.map((product) => (
+                <div key={product.id} className="search-mode-enter">
+                  <ProductCard
+                    product={product}
+                    onAddToCart={addToCart}
+                    onBuyNow={handleBuyNow}
+                    onToggleWishlist={toggleWishlist}
+                    isWishlisted={isWishlisted(product.id)}
+                    onClick={openProductDetail}
+                    isLocked={!user}
+                  />
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </section>
+    );
+  };
+
   const renderShop = () => {
     const isDemoMode = !user;
     const sourceLabel = productsSource === 'api'
       ? isDemoMode ? 'Live Demo Feed' : 'Live Fashion API'
       : isDemoMode ? 'Curated Demo Catalog' : 'Curated Fallback Catalog';
-    const spotlightProducts = filteredProducts.slice(0, 2);
-    const clothingCount = filteredProducts.filter(product => product.type === 'clothing').length;
-    const shoeCount = filteredProducts.filter(product => product.type === 'shoes').length;
+    const spotlightProducts = shopProducts.slice(0, 2);
+    const clothingCount = shopProducts.filter(product => product.type === 'clothing').length;
+    const shoeCount = shopProducts.filter(product => product.type === 'shoes').length;
     const locationLabel = selectedLocation === 'All' ? 'All Regions' : selectedLocation;
+    const visibleResultCount = isSearchMode ? searchResults.length : shopProducts.length;
+    const isCatalogLoading = isProductsLoading || isSearchResultsLoading;
     const sections = SHOP_SECTIONS.map((section) => ({
       ...section,
-      products: filteredProducts.filter(
+      products: shopProducts.filter(
         (product) => product.gender === section.gender && product.type === section.type
       ),
     }));
 
     return (
-      <div className="py-10 space-y-10">
-        <ShopUnlockBanner
-          isAuthenticated={Boolean(user)}
-          userName={user?.name}
-          cartCount={cartCount}
-          wishlistCount={wishlistCount}
-          onLogin={() => promptForAuth('login', 'Log in to unlock bag sync, wishlist saves, and checkout.')}
-          onRegister={() => promptForAuth('register', 'Create your account to unlock premium pricing moments and checkout.')}
-        />
+      <div className={`py-10 ${isSearchMode ? 'space-y-6' : 'space-y-10'}`}>
+        <div className="sticky top-[5.4rem] z-30 pb-2 sm:top-24">
+          <FilterBar
+            searchQuery={searchQuery}
+            selectedLocation={selectedLocation}
+            resultCount={visibleResultCount}
+            isLoading={isCatalogLoading}
+            isSearchMode={isSearchMode}
+            onSearchChange={setSearchQuery}
+            onLocationChange={setSelectedLocation}
+            onClearSearch={() => setSearchQuery('')}
+          />
+        </div>
 
-        <section className="fashion-stage relative overflow-hidden rounded-[2.6rem] border border-white/10 px-6 py-8 shadow-2xl sm:px-8 lg:px-10">
-          <div className="pointer-events-none absolute -left-16 top-8 h-44 w-44 rounded-full bg-cyan-400/20 blur-3xl" />
-          <div className="pointer-events-none absolute right-0 top-0 h-56 w-56 rounded-full bg-rose-400/20 blur-3xl" />
-          <div className="pointer-events-none absolute bottom-0 left-1/3 h-44 w-44 rounded-full bg-amber-300/10 blur-3xl" />
+        {isSearchMode ? (
+          renderSearchResults()
+        ) : (
+          <>
+            <ShopUnlockBanner
+              isAuthenticated={Boolean(user)}
+              userName={user?.name}
+              cartCount={cartCount}
+              wishlistCount={wishlistCount}
+              onLogin={() => promptForAuth('login', 'Log in to unlock bag sync, wishlist saves, and checkout.')}
+              onRegister={() => promptForAuth('register', 'Create your account to unlock premium pricing moments and checkout.')}
+            />
 
-          <div className="relative grid gap-8 xl:grid-cols-[minmax(0,1.12fr)_minmax(0,0.88fr)] xl:items-center">
-            <div className="space-y-6">
-              <div className="inline-flex items-center rounded-full border border-white/10 bg-white/10 px-4 py-1.5 text-[11px] font-black uppercase tracking-[0.2em] text-cyan-200">
-                Premium Fashion Edit
-              </div>
+            <section className="fashion-stage relative overflow-hidden rounded-[2.6rem] border border-white/10 px-6 py-8 shadow-2xl sm:px-8 lg:px-10">
+              <div className="pointer-events-none absolute -left-16 top-8 h-44 w-44 rounded-full bg-cyan-400/20 blur-3xl" />
+              <div className="pointer-events-none absolute right-0 top-0 h-56 w-56 rounded-full bg-rose-400/20 blur-3xl" />
+              <div className="pointer-events-none absolute bottom-0 left-1/3 h-44 w-44 rounded-full bg-amber-300/10 blur-3xl" />
 
-              <div className="space-y-3">
-                <h1 className="max-w-3xl text-4xl font-black tracking-tight text-white sm:text-5xl xl:text-[4.25rem] xl:leading-[0.96]">
-                  {isDemoMode
-                    ? 'Browse the drop in demo mode, then log in to turn intent into checkout.'
-                    : `Dynamic fashion sections, now tailored for ${user?.name || 'you'}.`}
-                </h1>
-                <p className="max-w-2xl text-base font-medium leading-relaxed text-slate-300 sm:text-lg">
-                  {isDemoMode
-                    ? 'Preview every collection, quick-view products, and feel the storefront. Login unlocks bag actions, wishlist saves, and personalized picks instantly.'
-                    : 'Browse premium clothing and footwear by collection, filter the feed by location, and enjoy a fully unlocked shopping journey.'}
-                </p>
-              </div>
+              <div className="relative grid gap-8 xl:grid-cols-[minmax(0,1.12fr)_minmax(0,0.88fr)] xl:items-center">
+                <div className="space-y-6">
+                  <div className="inline-flex items-center rounded-full border border-white/10 bg-white/10 px-4 py-1.5 text-[11px] font-black uppercase tracking-[0.2em] text-cyan-200">
+                    Premium Fashion Edit
+                  </div>
 
-              <FilterBar
-                searchQuery={searchQuery}
-                selectedLocation={selectedLocation}
-                resultCount={filteredProducts.length}
-                isLoading={isProductsLoading}
-                onSearchChange={setSearchQuery}
-                onLocationChange={setSelectedLocation}
-              />
+                  <div className="space-y-3">
+                    <h1 className="max-w-3xl text-4xl font-black tracking-tight text-white sm:text-5xl xl:text-[4.25rem] xl:leading-[0.96]">
+                      {isDemoMode
+                        ? 'Browse the drop in demo mode, then log in to turn intent into checkout.'
+                        : `Dynamic fashion sections, now tailored for ${user?.name || 'you'}.`}
+                    </h1>
+                    <p className="max-w-2xl text-base font-medium leading-relaxed text-slate-300 sm:text-lg">
+                      {isDemoMode
+                        ? 'Preview every collection, quick-view products, and feel the storefront. Login unlocks bag actions, wishlist saves, and personalized picks instantly.'
+                        : 'Browse premium clothing and footwear by collection, filter the feed by location, and enjoy a fully unlocked shopping journey.'}
+                    </p>
+                  </div>
 
-              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-                <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
-                  <p className="text-xs font-bold uppercase tracking-[0.16em] text-slate-400">Source</p>
-                  <p className="mt-2 text-lg font-black text-white">{sourceLabel}</p>
-                </div>
-                <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
-                  <p className="text-xs font-bold uppercase tracking-[0.16em] text-slate-400">{isDemoMode ? 'Demo Feed' : 'Visible Feed'}</p>
-                  <p className="mt-2 text-lg font-black text-white">{filteredProducts.length}</p>
-                </div>
-                <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
-                  <p className="text-xs font-bold uppercase tracking-[0.16em] text-slate-400">Clothing / Shoes</p>
-                  <p className="mt-2 text-lg font-black text-white">{clothingCount} / {shoeCount}</p>
-                </div>
-                <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
-                  <p className="text-xs font-bold uppercase tracking-[0.16em] text-slate-400">{isDemoMode ? 'Unlocks' : 'Location'}</p>
-                  <p className="mt-2 text-lg font-black text-white">{isDemoMode ? 'Bag + Wishlist + Checkout' : locationLabel}</p>
-                </div>
-              </div>
-            </div>
-
-            <div className="grid gap-4 sm:grid-cols-2">
-              {isProductsLoading && spotlightProducts.length === 0 ? (
-                Array.from({ length: 2 }).map((_, index) => (
-                  <div
-                    key={`spotlight-skeleton-${index}`}
-                    className={`overflow-hidden rounded-[2rem] border border-white/10 bg-slate-950/35 p-4 shadow-xl animate-pulse ${
-                      index === 0 ? 'sm:translate-y-4' : ''
-                    }`}
-                  >
-                    <div className="h-72 rounded-[1.7rem] bg-slate-800/80" />
-                    <div className="space-y-3 px-1 pb-1 pt-5">
-                      <div className="h-5 w-28 rounded-full bg-slate-700/80" />
-                      <div className="h-8 w-2/3 rounded-full bg-slate-700/80" />
-                      <div className="h-4 w-full rounded-full bg-slate-800/80" />
+                  <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                    <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+                      <p className="text-xs font-bold uppercase tracking-[0.16em] text-slate-400">Source</p>
+                      <p className="mt-2 text-lg font-black text-white">{sourceLabel}</p>
+                    </div>
+                    <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+                      <p className="text-xs font-bold uppercase tracking-[0.16em] text-slate-400">{isDemoMode ? 'Demo Feed' : 'Visible Feed'}</p>
+                      <p className="mt-2 text-lg font-black text-white">{shopProducts.length}</p>
+                    </div>
+                    <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+                      <p className="text-xs font-bold uppercase tracking-[0.16em] text-slate-400">Clothing / Shoes</p>
+                      <p className="mt-2 text-lg font-black text-white">{clothingCount} / {shoeCount}</p>
+                    </div>
+                    <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+                      <p className="text-xs font-bold uppercase tracking-[0.16em] text-slate-400">{isDemoMode ? 'Unlocks' : 'Location'}</p>
+                      <p className="mt-2 text-lg font-black text-white">{isDemoMode ? 'Bag + Wishlist + Checkout' : locationLabel}</p>
                     </div>
                   </div>
-                ))
-              ) : spotlightProducts.length > 0 ? (
-                spotlightProducts.map((product, index) => (
-                  <article
-                    key={product.id}
-                    className={`group relative overflow-hidden rounded-[2rem] border border-white/10 bg-slate-950/35 p-4 shadow-xl ${
-                      index === 0 ? 'sm:translate-y-4' : ''
-                    }`}
-                  >
-                    <div className="absolute inset-0 bg-gradient-to-br from-white/10 via-transparent to-transparent opacity-80" />
-                    <div className="relative overflow-hidden rounded-[1.7rem]">
-                      <img
-                        src={product.image}
-                        alt={product.name}
-                        loading="lazy"
-                        decoding="async"
-                        className="h-72 w-full object-cover transition-transform duration-700 group-hover:scale-110"
-                      />
-                      <div className="absolute inset-0 bg-gradient-to-t from-slate-950 via-slate-950/10 to-transparent" />
-                      <div className="absolute left-4 top-4 flex gap-2">
-                        <span className="rounded-full border border-white/15 bg-black/35 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.16em] text-white">
-                          {product.gender}
-                        </span>
-                        <span className="rounded-full border border-white/15 bg-white/10 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.16em] text-slate-100">
-                          {product.location}
-                        </span>
-                      </div>
-                    </div>
-
-                    <div className="relative space-y-3 px-1 pb-1 pt-5">
-                      <div className="flex items-start justify-between gap-4">
-                        <div>
-                          <h3 className="text-2xl font-black text-white">{product.name}</h3>
-                          <p className="mt-1 text-sm font-medium text-slate-300">{product.category}</p>
-                        </div>
-                        <span className="rounded-full bg-white px-3 py-1.5 text-sm font-black text-slate-950">
-                          {formatPrice(product.price)}
-                        </span>
-                      </div>
-                      <p className="copy-clamp-2 text-sm leading-relaxed text-slate-400">{product.description}</p>
-                    </div>
-                  </article>
-                ))
-              ) : (
-                <div className="sm:col-span-2 rounded-[2rem] border border-dashed border-white/15 bg-slate-950/35 px-6 py-20 text-center">
-                  <p className="text-xl font-bold text-slate-300">No products found for the selected location and search.</p>
                 </div>
-              )}
+
+                <div className="grid gap-4 sm:grid-cols-2">
+                  {isProductsLoading && spotlightProducts.length === 0 ? (
+                    Array.from({ length: 2 }).map((_, index) => (
+                      <div
+                        key={`spotlight-skeleton-${index}`}
+                        className={`overflow-hidden rounded-[2rem] border border-white/10 bg-slate-950/35 p-4 shadow-xl animate-pulse ${
+                          index === 0 ? 'sm:translate-y-4' : ''
+                        }`}
+                      >
+                        <div className="h-72 rounded-[1.7rem] bg-slate-800/80" />
+                        <div className="space-y-3 px-1 pb-1 pt-5">
+                          <div className="h-5 w-28 rounded-full bg-slate-700/80" />
+                          <div className="h-8 w-2/3 rounded-full bg-slate-700/80" />
+                          <div className="h-4 w-full rounded-full bg-slate-800/80" />
+                        </div>
+                      </div>
+                    ))
+                  ) : spotlightProducts.length > 0 ? (
+                    spotlightProducts.map((product, index) => (
+                      <article
+                        key={product.id}
+                        className={`group relative overflow-hidden rounded-[2rem] border border-white/10 bg-slate-950/35 p-4 shadow-xl ${
+                          index === 0 ? 'sm:translate-y-4' : ''
+                        }`}
+                      >
+                        <div className="absolute inset-0 bg-gradient-to-br from-white/10 via-transparent to-transparent opacity-80" />
+                        <div className="relative overflow-hidden rounded-[1.7rem]">
+                          <img
+                            src={product.image}
+                            alt={product.name}
+                            loading="lazy"
+                            decoding="async"
+                            className="h-72 w-full object-cover transition-transform duration-700 group-hover:scale-110"
+                          />
+                          <div className="absolute inset-0 bg-gradient-to-t from-slate-950 via-slate-950/10 to-transparent" />
+                          <div className="absolute left-4 top-4 flex gap-2">
+                            <span className="rounded-full border border-white/15 bg-black/35 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.16em] text-white">
+                              {product.gender}
+                            </span>
+                            <span className="rounded-full border border-white/15 bg-white/10 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.16em] text-slate-100">
+                              {product.location}
+                            </span>
+                          </div>
+                        </div>
+
+                        <div className="relative space-y-3 px-1 pb-1 pt-5">
+                          <div className="flex items-start justify-between gap-4">
+                            <div>
+                              <h3 className="text-2xl font-black text-white">{product.name}</h3>
+                              <p className="mt-1 text-sm font-medium text-slate-300">{product.category}</p>
+                            </div>
+                            <span className="rounded-full bg-white px-3 py-1.5 text-sm font-black text-slate-950">
+                              {formatPrice(product.price)}
+                            </span>
+                          </div>
+                          <p className="copy-clamp-2 text-sm leading-relaxed text-slate-400">{product.description}</p>
+                        </div>
+                      </article>
+                    ))
+                  ) : (
+                    <div className="sm:col-span-2 rounded-[2rem] border border-dashed border-white/15 bg-slate-950/35 px-6 py-20 text-center">
+                      <p className="text-xl font-bold text-slate-300">No products found for the selected location.</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </section>
+
+            {user && (
+              <RecommendationRail
+                title={`Recommended for ${user.name}`}
+                subtitle="Personalized Picks"
+                products={personalizedRecommendations}
+                onSelectProduct={openProductDetail}
+                onAddToCart={addToCart}
+                onBuyNow={handleBuyNow}
+              />
+            )}
+
+            <div className="space-y-8">
+              {sections.map((section) => (
+                <ProductSection
+                  key={section.id}
+                  title={section.title}
+                  subtitle={section.subtitle}
+                  accentClass={section.accentClass}
+                  products={section.products}
+                  visibleCount={visibleCounts[section.id] ?? SECTION_PAGE_SIZE}
+                  isLoading={isProductsLoading}
+                  isLocked={isDemoMode}
+                  onLoadMore={() =>
+                    setVisibleCounts((current) => ({
+                      ...current,
+                      [section.id]: Math.min(
+                        section.products.length,
+                        (current[section.id] ?? SECTION_PAGE_SIZE) + SECTION_PAGE_STEP
+                      ),
+                    }))
+                  }
+                  onViewAll={() =>
+                    setVisibleCounts((current) => ({
+                      ...current,
+                      [section.id]: Math.max(section.products.length, SECTION_PAGE_SIZE),
+                    }))
+                  }
+                  onAddToCart={addToCart}
+                  onBuyNow={handleBuyNow}
+                  onToggleWishlist={toggleWishlist}
+                  isWishlisted={isWishlisted}
+                  onSelectProduct={openProductDetail}
+                />
+              ))}
             </div>
-          </div>
-        </section>
-
-        {user && (
-          <RecommendationRail
-            title={`Recommended for ${user.name}`}
-            subtitle="Personalized Picks"
-            products={personalizedRecommendations}
-            onSelectProduct={openProductDetail}
-            onAddToCart={addToCart}
-            onBuyNow={handleBuyNow}
-          />
+          </>
         )}
-
-        <div className="space-y-8">
-          {sections.map((section) => (
-            <ProductSection
-              key={section.id}
-              title={section.title}
-              subtitle={section.subtitle}
-              accentClass={section.accentClass}
-              products={section.products}
-              visibleCount={visibleCounts[section.id] ?? SECTION_PAGE_SIZE}
-              isLoading={isProductsLoading}
-              isLocked={isDemoMode}
-              onLoadMore={() =>
-                setVisibleCounts((current) => ({
-                  ...current,
-                  [section.id]: Math.min(
-                    section.products.length,
-                    (current[section.id] ?? SECTION_PAGE_SIZE) + SECTION_PAGE_STEP
-                  ),
-                }))
-              }
-              onViewAll={() =>
-                setVisibleCounts((current) => ({
-                  ...current,
-                  [section.id]: Math.max(section.products.length, SECTION_PAGE_SIZE),
-                }))
-              }
-              onAddToCart={addToCart}
-              onBuyNow={handleBuyNow}
-              onToggleWishlist={toggleWishlist}
-              isWishlisted={isWishlisted}
-              onSelectProduct={openProductDetail}
-            />
-          ))}
-        </div>
       </div>
     );
   };
@@ -2051,7 +2218,7 @@ const App: React.FC = () => {
         }}
       />
 
-      <main className="flex-grow max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+      <main className={`mx-auto flex-grow w-full px-4 sm:px-6 lg:px-8 ${isShopSearchMode ? 'max-w-[96rem]' : 'max-w-7xl'}`}>
         {currentView === 'home' && renderHome()}
         {currentView === 'shop' && renderShop()}
         {currentView === 'product' && renderProductDetails()}
@@ -2067,14 +2234,28 @@ const App: React.FC = () => {
         )}
       </main>
 
-      <footer className="glass-effect mt-20 py-16 border-t border-white/30">
+      {!isShopSearchMode && (
+        <footer className="glass-effect mt-20 py-16 border-t border-white/30">
         <div className="max-w-7xl mx-auto px-4 text-center space-y-4">
           <p className="text-gray-900 font-bold text-lg tracking-tight">LUMINA COMMERCE</p>
           <p className="text-gray-400 text-sm font-medium">© 2024 Intelligent Curation. Powered by Lumina Engine.</p>
         </div>
-      </footer>
+        </footer>
+      )}
 
-      <ShoppingAssistant products={products} />
+      {!isShopSearchMode && (
+        <ShoppingAssistant
+          products={products}
+          cart={cart}
+          wishlist={wishlist}
+          user={user}
+          onSelectProduct={openProductDetail}
+          onApplySearch={(query) => {
+            setSearchQuery(query);
+            goToView('shop');
+          }}
+        />
+      )}
 
       <LoginModal
         isOpen={isLoginModalOpen}
