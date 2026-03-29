@@ -6,13 +6,13 @@ import {
   Menu,
   ShieldCheck,
   ShoppingBag,
-  Sparkles,
   UserRound,
   X,
   type LucideIcon,
 } from 'lucide-react';
 import { AppView, User } from '../types';
 import GoogleIcon from './GoogleIcon';
+import LuminaMark from './LuminaMark';
 
 interface NavbarProps {
   currentView: AppView;
@@ -123,10 +123,7 @@ const Navbar: React.FC<NavbarProps> = ({
               className="group flex min-w-0 items-center gap-3 text-left"
               onClick={() => handleViewChange(user ? 'shop' : 'home')}
             >
-              <span className="relative flex h-14 w-14 shrink-0 items-center justify-center rounded-[22px] border border-white/[0.15] bg-white/10 shadow-[inset_0_1px_0_rgba(255,255,255,0.18),0_18px_38px_-26px_rgba(56,189,248,0.8)]">
-                <span className="absolute inset-1 rounded-[18px] bg-gradient-to-br from-cyan-300/20 via-white/5 to-fuchsia-400/25" />
-                <Sparkles className="relative h-6 w-6 text-cyan-100 transition-transform duration-500 group-hover:rotate-12 group-hover:scale-110" />
-              </span>
+              <LuminaMark className="h-14 w-14 shrink-0 rounded-[22px] transition-transform duration-500 group-hover:-rotate-6 group-hover:scale-105" />
 
               <span className="min-w-0">
                 <span className="flex items-center gap-2">
@@ -316,9 +313,7 @@ const Navbar: React.FC<NavbarProps> = ({
                       {user ? 'Your storefront is primed and ready.' : 'Explore the collection and unlock premium access.'}
                     </p>
                   </div>
-                  <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-cyan-300/25 via-white/10 to-fuchsia-400/25 text-cyan-100">
-                    <Sparkles className="h-5 w-5" />
-                  </span>
+                  <LuminaMark className="h-11 w-11 shrink-0 rounded-2xl" />
                 </div>
 
                 <div className="mt-3 grid gap-2">

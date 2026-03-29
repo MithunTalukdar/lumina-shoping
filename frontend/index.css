@@ -110,6 +110,175 @@
   animation: lumina-brand-shine 7s linear infinite;
 }
 
+.lumina-mark {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  isolation: isolate;
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  background:
+    radial-gradient(circle at 18% 16%, rgba(103, 232, 249, 0.24), transparent 34%),
+    radial-gradient(circle at 84% 82%, rgba(244, 114, 182, 0.22), transparent 38%),
+    linear-gradient(145deg, rgba(8, 22, 39, 0.98), rgba(18, 34, 56, 0.94));
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.14),
+    0 18px 36px -26px rgba(8, 145, 178, 0.85);
+}
+
+.lumina-mark::before {
+  content: '';
+  position: absolute;
+  inset: 1px;
+  border-radius: inherit;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.09), transparent 28%, rgba(255, 255, 255, 0.02));
+  pointer-events: none;
+}
+
+.lumina-mark,
+.lumina-mark__halo,
+.lumina-mark__diamond,
+.lumina-mark__stem,
+.lumina-mark__base,
+.lumina-mark__spark,
+.lumina-mark__dot {
+  transition:
+    transform 0.45s cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 0.45s ease,
+    box-shadow 0.45s ease;
+}
+
+.lumina-mark__grid,
+.lumina-mark__halo,
+.lumina-mark__diamond,
+.lumina-mark__stem,
+.lumina-mark__base,
+.lumina-mark__spark,
+.lumina-mark__dot {
+  position: absolute;
+}
+
+.lumina-mark__grid {
+  inset: 0;
+  opacity: 0.32;
+  background-image:
+    linear-gradient(rgba(148, 163, 184, 0.12) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(148, 163, 184, 0.12) 1px, transparent 1px);
+  background-size: 7px 7px;
+  mask-image: radial-gradient(circle at center, black 40%, transparent 100%);
+}
+
+.lumina-mark__halo {
+  width: 60%;
+  height: 60%;
+  border-radius: 1rem;
+  border: 1px solid rgba(103, 232, 249, 0.28);
+  box-shadow: 0 0 22px rgba(103, 232, 249, 0.16);
+}
+
+.lumina-mark__diamond {
+  width: 38%;
+  height: 38%;
+  border-radius: 0.45rem;
+  border: 1.5px solid rgba(224, 242, 254, 0.88);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.18),
+    0 0 18px rgba(103, 232, 249, 0.18);
+  transform: rotate(45deg);
+}
+
+.lumina-mark__stem {
+  top: 28%;
+  left: 39%;
+  width: 8%;
+  height: 36%;
+  border-radius: 999px;
+  background: linear-gradient(180deg, #ecfeff, #67e8f9 70%, #38bdf8);
+  box-shadow: 0 0 12px rgba(103, 232, 249, 0.28);
+}
+
+.lumina-mark__base {
+  top: 57%;
+  left: 39%;
+  width: 25%;
+  height: 8%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #ecfeff, #fbcfe8);
+  box-shadow: 0 0 12px rgba(244, 114, 182, 0.22);
+}
+
+.lumina-mark__spark {
+  top: 21%;
+  right: 20%;
+  width: 16%;
+  height: 16%;
+  border-radius: 0.35rem;
+  border: 1px solid rgba(255, 255, 255, 0.72);
+  background: radial-gradient(circle at 35% 35%, rgba(255, 255, 255, 0.38), rgba(103, 232, 249, 0.14));
+  box-shadow: 0 0 12px rgba(125, 211, 252, 0.2);
+  transform: rotate(45deg);
+}
+
+.lumina-mark__spark::before,
+.lumina-mark__spark::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.88);
+  transform: translate(-50%, -50%);
+}
+
+.lumina-mark__spark::before {
+  width: 56%;
+  height: 1.5px;
+}
+
+.lumina-mark__spark::after {
+  width: 1.5px;
+  height: 56%;
+}
+
+.lumina-mark__spark--secondary {
+  top: 45%;
+  right: 15%;
+  width: 10%;
+  height: 10%;
+  opacity: 0.75;
+  border-color: rgba(103, 232, 249, 0.64);
+}
+
+.lumina-mark__dot {
+  left: 24%;
+  bottom: 23%;
+  width: 10%;
+  height: 10%;
+  border-radius: 999px;
+  background: linear-gradient(135deg, #67e8f9, #fbcfe8);
+  box-shadow:
+    0 0 14px rgba(103, 232, 249, 0.35),
+    0 0 10px rgba(244, 114, 182, 0.16);
+}
+
+.group:hover .lumina-mark__halo {
+  transform: scale(1.06);
+  box-shadow: 0 0 26px rgba(103, 232, 249, 0.22);
+}
+
+.group:hover .lumina-mark__diamond {
+  transform: rotate(50deg) scale(1.05);
+}
+
+.group:hover .lumina-mark__spark {
+  transform: rotate(50deg) scale(1.08);
+}
+
+.group:hover .lumina-mark__dot {
+  transform: translate(2px, -2px) scale(1.1);
+}
+
 .lumina-nav-active {
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.48),

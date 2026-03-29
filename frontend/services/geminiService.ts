@@ -1,18 +1,34 @@
 import { Product } from "../types";
 import { buildApiUrl } from "./apiBase";
 
-interface AssistantHistoryMessage {
-  role: string;
+export interface AssistantHistoryMessage {
+  role: "user" | "model";
   parts: { text: string }[];
 }
 
 interface AssistantResponse {
   reply?: string;
+  didFallback?: boolean;
 }
 
 interface ProductDescriptionResponse {
   description?: string;
+  didFallback?: boolean;
 }
+
+export interface ShoppingAssistantContext {
+  userName?: string | null;
+  cartItems?: number;
+  wishlistItems?: number;
+}
+
+export interface ShoppingAssistantReply {
+  reply: string;
+  didFallback: boolean;
+}
+
+const CHAT_FALLBACK_REPLY =
+  "I'm having trouble connecting right now, but I can still help once the AI service is available again.";
 
 async function request<T>(path: string, payload: Record<string, unknown>): Promise<T> {
   const response = await fetch(buildApiUrl(path), {
@@ -39,19 +55,27 @@ async function request<T>(path: string, payload: Record<string, unknown>): Promi
 export async function getShoppingAssistantResponse(
   query: string,
   products: Product[],
-  history: AssistantHistoryMessage[] = []
-) {
+  history: AssistantHistoryMessage[] = [],
+  context: ShoppingAssistantContext = {}
+): Promise<ShoppingAssistantReply> {
   try {
     const response = await request<AssistantResponse>("/api/assistant", {
       query,
       products,
-      history,
+      history: history.slice(-10),
+      context,
     });
 
-    return response.reply || "I'm sorry, I couldn't process that request.";
+    return {
+      reply: response.reply || "I'm sorry, I couldn't process that request.",
+      didFallback: Boolean(response.didFallback),
+    };
   } catch (error) {
     console.error("Assistant Error:", error);
-    return "I'm having trouble connecting to my system right now. Please try again later!";
+    return {
+      reply: CHAT_FALLBACK_REPLY,
+      didFallback: true,
+    };
   }
 }
 
