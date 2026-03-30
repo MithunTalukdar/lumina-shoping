@@ -1,13 +1,16 @@
 import React from 'react';
+import { INDIAN_LOCATION_OPTIONS, type IndianCatalogLocation } from '../utils/india';
+
+type LocationFilter = 'All' | IndianCatalogLocation;
 
 interface FilterBarProps {
   searchQuery: string;
-  selectedLocation: 'All' | 'India' | 'NRI' | 'Dhaka';
+  selectedLocation: LocationFilter;
   resultCount: number;
   isLoading: boolean;
   isSearchMode: boolean;
   onSearchChange: (value: string) => void;
-  onLocationChange: (value: 'All' | 'India' | 'NRI' | 'Dhaka') => void;
+  onLocationChange: (value: LocationFilter) => void;
   onClearSearch: () => void;
 }
 
@@ -66,10 +69,12 @@ const FilterBar: React.FC<FilterBarProps> = ({
             onChange={(event) => onLocationChange(event.target.value as FilterBarProps['selectedLocation'])}
             className="w-full rounded-[1.25rem] border border-white/10 bg-slate-950/60 px-4 py-3 text-sm font-semibold text-slate-100 outline-none transition-all focus:border-cyan-300/60 focus:ring-2 focus:ring-cyan-300/20"
           >
-            <option value="All">All Locations</option>
-            <option value="India">India</option>
-            <option value="NRI">NRI</option>
-            <option value="Dhaka">Dhaka</option>
+            <option value="All">All India Locations</option>
+            {INDIAN_LOCATION_OPTIONS.map((location) => (
+              <option key={location.city} value={location.city}>
+                {location.city}{location.city === 'Kolkata' ? ' (Highlighted)' : ''}
+              </option>
+            ))}
           </select>
         </label>
 

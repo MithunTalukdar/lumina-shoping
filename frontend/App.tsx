@@ -12,24 +12,27 @@ import {
   Trash2,
   Truck,
 } from 'lucide-react';
-import { Product, CartItem, AppView } from './types';
+import { Product, CartItem, AppView, ShippingAddress } from './types';
 import { INITIAL_PRODUCTS } from './constants';
 import FilterBar from './components/FilterBar';
 import Navbar from './components/Navbar';
 import ProductCard from './components/ProductCard';
 import ProductSection from './components/ProductSection';
 import ProfilePage, { type ProfilePageTab } from './components/ProfilePage';
+import AdminPanel from './components/AdminPanel';
 import ShoppingAssistant from './components/ShoppingAssistant';
 import LoginModal from './components/LoginModal';
-import ShopUnlockBanner from './components/ShopUnlockBanner';
 import RecommendationRail from './components/RecommendationRail';
 import { checkoutCart, getCart, saveCart } from './services/cartService';
 import { getProducts } from './services/productService';
 import { getWishlist, saveWishlist } from './services/wishlistService';
+import { clearPostAuthRedirectPath, setPostAuthRedirectPath } from './services/authService';
+import { createAddress, deleteAddress, getAddresses, updateAddress } from './services/profileService';
 import { formatPrice } from './utils/currency';
 import { AuthMode, useAuth } from './context/AuthContext';
+import { getIndianLocationMeta, type IndianCatalogLocation, type ShippingAddressInput } from './utils/india';
 
-type LocationFilter = 'All' | 'India' | 'NRI' | 'Dhaka';
+type LocationFilter = 'All' | IndianCatalogLocation;
 
 const SHOP_SECTIONS = [
   {
@@ -124,7 +127,7 @@ const getRouteFromPath = (pathname: string): AppRoute => {
 const isStorefrontProduct = (item: Product) =>
   (item.gender === 'men' || item.gender === 'women') &&
   (item.type === 'clothing' || item.type === 'shoes') &&
-  (item.location === 'India' || item.location === 'NRI' || item.location === 'Dhaka') &&
+  Boolean(getIndianLocationMeta(item.location)) &&
   typeof item.category === 'string' &&
   item.category.length > 0;
 
@@ -225,13 +228,17 @@ const App: React.FC = () => {
   const [searchResults, setSearchResults] = useState<Product[]>([]);
   const [isSearchResultsLoading, setIsSearchResultsLoading] = useState(false);
   const [searchResultsSource, setSearchResultsSource] = useState<'api' | 'fallback'>('fallback');
-  const [selectedLocation, setSelectedLocation] = useState<LocationFilter>('All');
+  const [selectedLocation, setSelectedLocation] = useState<LocationFilter>('Kolkata');
   const [isProductsLoading, setIsProductsLoading] = useState(false);
   const [productsSource, setProductsSource] = useState<'api' | 'fallback'>('fallback');
   const [visibleCounts, setVisibleCounts] = useState<Record<string, number>>(() => createInitialVisibleCounts());
   const [isCartLoading, setIsCartLoading] = useState(false);
   const [isCartSyncing, setIsCartSyncing] = useState(false);
   const [cartError, setCartError] = useState<string | null>(null);
+  const [addresses, setAddresses] = useState<ShippingAddress[]>([]);
+  const [selectedAddressId, setSelectedAddressId] = useState<string | null>(null);
+  const [isAddressesLoading, setIsAddressesLoading] = useState(false);
+  const [addressError, setAddressError] = useState<string | null>(null);
   const [isWishlistLoading, setIsWishlistLoading] = useState(false);
   const [isWishlistSyncing, setIsWishlistSyncing] = useState(false);
   const [wishlistError, setWishlistError] = useState<string | null>(null);
@@ -316,6 +323,7 @@ const App: React.FC = () => {
 
         if (!user) {
           pendingProtectedViewRef.current = 'profile';
+          setPostAuthRedirectPath(getPathForRoute('profile'));
           setView('home');
           window.history.replaceState(null, '', getPathForRoute('login'));
           openAuthModal('login', 'Log in to open your profile dashboard, order history, and password settings.');
@@ -328,9 +336,31 @@ const App: React.FC = () => {
 
       if ((route === 'cart' || route === 'wishlist') && !user) {
         pendingProtectedViewRef.current = route;
+        setPostAuthRedirectPath(getPathForRoute(route));
         setView('home');
         window.history.replaceState(null, '', getPathForRoute('login'));
         openAuthModal('login', 'Log in to unlock your synced bag, favorites, and member tools.');
+        return;
+      }
+
+      if (route === 'admin') {
+        if (!user) {
+          pendingProtectedViewRef.current = 'admin';
+          setPostAuthRedirectPath(getPathForRoute('admin'));
+          setView('home');
+          window.history.replaceState(null, '', getPathForRoute('login'));
+          openAuthModal('login', 'Log in with an admin account to access the control center.');
+          return;
+        }
+
+        if (user.role !== 'admin') {
+          pendingProtectedViewRef.current = null;
+          window.history.replaceState(null, '', getPathForRoute('shop'));
+          setView('shop');
+          return;
+        }
+
+        setView('admin');
         return;
       }
 
@@ -353,6 +383,13 @@ const App: React.FC = () => {
     if (user && pendingProtectedViewRef.current) {
       const nextView = pendingProtectedViewRef.current;
       pendingProtectedViewRef.current = null;
+
+      if (nextView === 'admin' && user.role !== 'admin') {
+        window.history.replaceState(null, '', getPathForRoute('shop'));
+        setView('shop');
+        return;
+      }
+
       window.history.replaceState(null, '', getPathForRoute(nextView));
       setView(nextView);
       return;
@@ -375,6 +412,53 @@ const App: React.FC = () => {
   useEffect(() => {
     setVisibleCounts(createInitialVisibleCounts());
   }, [selectedLocation]);
+
+  useEffect(() => {
+    let mounted = true;
+
+    const loadShippingAddresses = async () => {
+      if (!user) {
+        setAddresses([]);
+        setSelectedAddressId(null);
+        setAddressError(null);
+        setIsAddressesLoading(false);
+        return;
+      }
+
+      setIsAddressesLoading(true);
+      setAddressError(null);
+
+      try {
+        const nextAddresses = await getAddresses();
+        if (!mounted) {
+          return;
+        }
+
+        setAddresses(nextAddresses);
+        const defaultAddress = nextAddresses.find((address) => address.isDefault) ?? nextAddresses[0] ?? null;
+        setSelectedAddressId(defaultAddress?.id ?? null);
+      } catch (error) {
+        if (!mounted) {
+          return;
+        }
+
+        const message = error instanceof Error ? error.message : 'Unable to load shipping addresses.';
+        setAddresses([]);
+        setSelectedAddressId(null);
+        setAddressError(message);
+      } finally {
+        if (mounted) {
+          setIsAddressesLoading(false);
+        }
+      }
+    };
+
+    void loadShippingAddresses();
+
+    return () => {
+      mounted = false;
+    };
+  }, [user]);
 
   useEffect(() => {
     if (isAuthLoading || user) {
@@ -661,6 +745,10 @@ const App: React.FC = () => {
   const cartSummary = useMemo(() => buildCartSummary(cart), [cart]);
   const cartCount = useMemo(() => cart.reduce((acc, item) => acc + item.quantity, 0), [cart]);
   const wishlistCount = useMemo(() => wishlist.length, [wishlist]);
+  const selectedAddress = useMemo(
+    () => addresses.find((address) => address.id === selectedAddressId) ?? addresses.find((address) => address.isDefault) ?? addresses[0] ?? null,
+    [addresses, selectedAddressId]
+  );
   const canAccessAdmin = user?.role === 'admin';
   const currentView = user && view === 'home' ? 'shop' : view;
   const isShopSearchMode = currentView === 'shop' && isSearchMode;
@@ -682,9 +770,67 @@ const App: React.FC = () => {
     return sortedPool.slice(0, 3);
   }, [user, wishlist, cart, shopProducts]);
 
+  const refreshAddresses = async (preferredAddressId?: string | null) => {
+    if (!user) {
+      setAddresses([]);
+      setSelectedAddressId(null);
+      return;
+    }
+
+    setIsAddressesLoading(true);
+    setAddressError(null);
+
+    try {
+      const nextAddresses = await getAddresses();
+      setAddresses(nextAddresses);
+      const resolvedAddress =
+        (preferredAddressId ? nextAddresses.find((address) => address.id === preferredAddressId) : null) ??
+        nextAddresses.find((address) => address.isDefault) ??
+        nextAddresses[0] ??
+        null;
+      setSelectedAddressId(resolvedAddress?.id ?? null);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unable to load shipping addresses.';
+      setAddressError(message);
+    } finally {
+      setIsAddressesLoading(false);
+    }
+  };
+
+  const handleSaveAddress = async (input: ShippingAddressInput) => {
+    const normalizedInput: ShippingAddressInput = {
+      ...input,
+      state: input.city ? getIndianLocationMeta(input.city)?.state ?? input.state : input.state,
+    };
+
+    const nextAddresses = input.id
+      ? await updateAddress(input.id, normalizedInput)
+      : await createAddress(normalizedInput);
+
+    setAddresses(nextAddresses);
+    const defaultAddress =
+      nextAddresses.find((address) => address.id === input.id) ??
+      nextAddresses.find((address) => address.isDefault) ??
+      nextAddresses[0] ??
+      null;
+    setSelectedAddressId(defaultAddress?.id ?? null);
+    setAddressError(null);
+  };
+
+  const handleDeleteAddress = async (addressId: string) => {
+    const nextAddresses = await deleteAddress(addressId);
+    setAddresses(nextAddresses);
+    const defaultAddress = nextAddresses.find((address) => address.isDefault) ?? nextAddresses[0] ?? null;
+    setSelectedAddressId(defaultAddress?.id ?? null);
+    setAddressError(null);
+  };
+
   // Handlers
   const promptForAuth = (mode: AuthMode, message: string, nextView?: AppView) => {
     pendingProtectedViewRef.current = nextView ?? null;
+    if (nextView) {
+      setPostAuthRedirectPath(getPathForRoute(nextView));
+    }
 
     openAuthModal(mode, message);
   };
@@ -734,6 +880,7 @@ const App: React.FC = () => {
     }
 
     pendingProtectedViewRef.current = nextView;
+    setPostAuthRedirectPath(getPathForRoute(nextView));
     updateBrowserPath('login', options.replaceHistory);
     openAuthModal(options.mode ?? 'login', message);
   };
@@ -764,6 +911,20 @@ const App: React.FC = () => {
       return;
     }
 
+    if (nextView === 'admin') {
+      if (!user) {
+        redirectProtectedViewToLogin('admin', 'Log in with an admin account to access the control center.', {
+          replaceHistory: options.replaceHistory,
+        });
+        return;
+      }
+
+      if (user.role !== 'admin') {
+        commitViewChange('shop', { replaceHistory: options.replaceHistory });
+        return;
+      }
+    }
+
     commitViewChange(nextView, options);
   };
 
@@ -778,20 +939,30 @@ const App: React.FC = () => {
   };
 
   const addToCart = (product: Product) => {
+    if (product.stock <= 0) {
+      return;
+    }
+
     if (!user) {
       promptForAuth('login', 'Log in to add this style to your bag and keep it synced across visits.');
       return;
     }
 
+    setCartError(null);
     upsertCartItem(product);
   };
 
   const handleBuyNow = (product: Product) => {
+    if (product.stock <= 0) {
+      return;
+    }
+
     if (!user) {
       promptForAuth('register', 'Create your account to unlock instant checkout for this product.');
       return;
     }
 
+    setCartError(null);
     upsertCartItem(product);
     setSelectedProduct(product);
     goToView('cart');
@@ -847,14 +1018,24 @@ const App: React.FC = () => {
       return;
     }
 
+    if (!selectedAddress) {
+      setCartError('Add a valid Indian shipping address before checkout.');
+      goToView('profile', { profileTab: 'addresses' });
+      return;
+    }
+
     setIsCheckoutLoading(true);
 
     try {
-      const response = await checkoutCart();
+      const response = await checkoutCart(selectedAddress.id);
       skipNextCartSyncRef.current = true;
       setCart([]);
       setCartError(null);
-      alert(`${response.message} Total charged: ${formatPrice(response.orderSummary.total)}. Opening your order history.`);
+      alert(
+        `${response.message} ${response.orderNumber ? `Tracking ID: ${response.orderNumber}. ` : ''}Total charged: ${formatPrice(
+          response.orderSummary.total
+        )}.`
+      );
       goToView('profile', { profileTab: 'orders' });
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Checkout failed.';
@@ -1092,7 +1273,7 @@ const App: React.FC = () => {
   };
 
   const renderSearchResults = () => {
-    const locationLabel = selectedLocation === 'All' ? 'All Regions' : selectedLocation;
+    const locationLabel = selectedLocation === 'All' ? 'All India Locations' : selectedLocation;
     const searchSourceLabel = isSearchResultsLoading
       ? 'Searching Feed'
       : searchResultsSource === 'api'
@@ -1139,7 +1320,7 @@ const App: React.FC = () => {
           </div>
 
           {isSearchResultsLoading ? (
-            <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
+            <div className="grid grid-cols-2 gap-4 lg:grid-cols-4 2xl:grid-cols-5">
               {Array.from({ length: SEARCH_RESULTS_SKELETON_COUNT }).map((_, index) => (
                 <div
                   key={`search-result-skeleton-${index}`}
@@ -1164,7 +1345,7 @@ const App: React.FC = () => {
               </p>
             </div>
           ) : (
-            <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
+            <div className="grid grid-cols-2 gap-4 lg:grid-cols-4 2xl:grid-cols-5">
               {searchResults.map((product) => (
                 <div key={product.id} className="search-mode-enter">
                   <ProductCard
@@ -1193,7 +1374,7 @@ const App: React.FC = () => {
     const spotlightProducts = shopProducts.slice(0, 2);
     const clothingCount = shopProducts.filter(product => product.type === 'clothing').length;
     const shoeCount = shopProducts.filter(product => product.type === 'shoes').length;
-    const locationLabel = selectedLocation === 'All' ? 'All Regions' : selectedLocation;
+    const locationLabel = selectedLocation === 'All' ? 'All India Locations' : selectedLocation;
     const visibleResultCount = isSearchMode ? searchResults.length : shopProducts.length;
     const isCatalogLoading = isProductsLoading || isSearchResultsLoading;
     const sections = SHOP_SECTIONS.map((section) => ({
@@ -1222,15 +1403,6 @@ const App: React.FC = () => {
           renderSearchResults()
         ) : (
           <>
-            <ShopUnlockBanner
-              isAuthenticated={Boolean(user)}
-              userName={user?.name}
-              cartCount={cartCount}
-              wishlistCount={wishlistCount}
-              onLogin={() => promptForAuth('login', 'Log in to unlock bag sync, wishlist saves, and checkout.')}
-              onRegister={() => promptForAuth('register', 'Create your account to unlock premium pricing moments and checkout.')}
-            />
-
             <section className="fashion-stage relative overflow-hidden rounded-[2.6rem] border border-white/10 px-6 py-8 shadow-2xl sm:px-8 lg:px-10">
               <div className="pointer-events-none absolute -left-16 top-8 h-44 w-44 rounded-full bg-cyan-400/20 blur-3xl" />
               <div className="pointer-events-none absolute right-0 top-0 h-56 w-56 rounded-full bg-rose-400/20 blur-3xl" />
@@ -1406,17 +1578,49 @@ const App: React.FC = () => {
         </button>
         
         <div className="fashion-section-shell grid grid-cols-1 items-start gap-12 rounded-[3rem] border border-white/10 p-8 shadow-2xl lg:grid-cols-2 lg:p-12">
-          <div className="relative overflow-hidden rounded-[2.5rem] border border-white/10 bg-slate-950/40 shadow-lg">
-            <img src={selectedProduct.image} alt={selectedProduct.name} className="aspect-square w-full object-cover" />
-            <div className="absolute inset-0 bg-gradient-to-t from-slate-950 via-slate-950/10 to-transparent" />
-            <div className="absolute left-5 top-5 flex flex-wrap gap-2">
-              <span className="rounded-full border border-white/10 bg-white/15 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.16em] text-white">
-                {selectedProduct.gender}
-              </span>
-              <span className="rounded-full border border-white/10 bg-black/35 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.16em] text-slate-100">
-                {selectedProduct.category}
-              </span>
+          <div className="space-y-4">
+            <div className="relative overflow-hidden rounded-[2.5rem] border border-white/10 bg-slate-950/40 shadow-lg">
+              <img src={selectedProduct.images?.[0] ?? selectedProduct.image} alt={selectedProduct.name} className="aspect-square w-full object-cover" />
+              <div className="absolute inset-0 bg-gradient-to-t from-slate-950 via-slate-950/10 to-transparent" />
+              <div className="absolute left-5 top-5 flex flex-wrap gap-2">
+                <span className="rounded-full border border-white/10 bg-white/15 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.16em] text-white">
+                  {selectedProduct.gender}
+                </span>
+                <span className="rounded-full border border-white/10 bg-black/35 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.16em] text-slate-100">
+                  {selectedProduct.category}
+                </span>
+                {(selectedProduct.badges ?? []).map((badge) => (
+                  <span
+                    key={`${selectedProduct.id}-${badge}`}
+                    className={`rounded-full border px-3 py-1 text-[10px] font-bold uppercase tracking-[0.16em] ${
+                      badge === 'Out of Stock'
+                        ? 'border-rose-300/25 bg-rose-400/15 text-rose-50'
+                        : badge === 'Trending'
+                        ? 'border-amber-300/25 bg-amber-300/15 text-amber-50'
+                        : 'border-cyan-300/25 bg-cyan-300/15 text-cyan-50'
+                    }`}
+                  >
+                    {badge}
+                  </span>
+                ))}
+              </div>
             </div>
+
+            {selectedProduct.images && selectedProduct.images.length > 1 && (
+              <div className="grid grid-cols-3 gap-3">
+                {selectedProduct.images.slice(0, 3).map((imageUrl, index) => (
+                  <div key={`${selectedProduct.id}-thumb-${index}`} className="overflow-hidden rounded-[1.5rem] border border-white/10 bg-slate-950/35">
+                    <img
+                      src={imageUrl}
+                      alt={`${selectedProduct.name} view ${index + 1}`}
+                      loading="lazy"
+                      decoding="async"
+                      className="aspect-square w-full object-cover"
+                    />
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
 
           <div className="space-y-8">
@@ -1434,8 +1638,8 @@ const App: React.FC = () => {
                 <span className="rounded-full border border-cyan-300/20 bg-cyan-400/10 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.18em] text-cyan-200">
                   {selectedProduct.location}
                 </span>
-                <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.18em] text-slate-300">
-                  {selectedProduct.stock} Left in Stock
+                <span className={`rounded-full border px-3 py-1 text-[10px] font-bold uppercase tracking-[0.18em] ${selectedProduct.stock > 0 ? 'border-white/10 bg-white/5 text-slate-300' : 'border-rose-300/20 bg-rose-400/15 text-rose-50'}`}>
+                  {selectedProduct.stock > 0 ? `${selectedProduct.stock} Left in Stock` : 'Out of Stock'}
                 </span>
               </div>
 
@@ -1455,7 +1659,17 @@ const App: React.FC = () => {
               </div>
             </div>
 
-            <p className="text-4xl font-black text-gray-900 tracking-tighter">{formatPrice(selectedProduct.price)}</p>
+            <div className="flex flex-wrap items-end gap-4">
+              <p className="text-4xl font-black text-gray-900 tracking-tighter">{formatPrice(selectedProduct.price)}</p>
+              {selectedProduct.originalPrice && selectedProduct.originalPrice > selectedProduct.price && (
+                <>
+                  <p className="text-lg font-bold text-slate-500 line-through">{formatPrice(selectedProduct.originalPrice)}</p>
+                  <span className="rounded-full border border-emerald-300/25 bg-emerald-400/15 px-3 py-1 text-[11px] font-black uppercase tracking-[0.18em] text-emerald-100">
+                    {selectedProduct.discountPercentage}% off
+                  </span>
+                </>
+              )}
+            </div>
 
             <p className="text-gray-600 text-lg leading-relaxed font-medium">
               {selectedProduct.description}
@@ -1478,9 +1692,12 @@ const App: React.FC = () => {
 
             <div className="grid gap-4 border-t border-white/10 pt-8 sm:grid-cols-3">
               <button
+                disabled={selectedProduct.stock <= 0}
                 onClick={() => addToCart(selectedProduct)}
                 className={`rounded-[1.5rem] py-5 text-lg font-bold transition-all flex items-center justify-center space-x-3 shadow-xl ${
-                  user
+                  selectedProduct.stock <= 0
+                    ? 'cursor-not-allowed border border-white/10 bg-white/5 text-slate-500'
+                    : user
                     ? 'bg-white text-slate-950 hover:-translate-y-1 hover:bg-cyan-300'
                     : 'border border-white/10 bg-white/10 text-white backdrop-blur-sm hover:bg-white/15'
                 }`}
@@ -1488,17 +1705,20 @@ const App: React.FC = () => {
                 <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 11V7a4 4 0 00-8 0v4M5 9h14l1 12H4L5 9z" />
                 </svg>
-                <span>{user ? 'Add to Bag' : 'Unlock Bag'}</span>
+                <span>{selectedProduct.stock <= 0 ? 'Out of Stock' : user ? 'Add to Bag' : 'Unlock Bag'}</span>
               </button>
               <button
+                disabled={selectedProduct.stock <= 0}
                 onClick={() => handleBuyNow(selectedProduct)}
                 className={`rounded-[1.5rem] border-2 py-5 font-bold text-lg transition-all ${
-                  user
+                  selectedProduct.stock <= 0
+                    ? 'cursor-not-allowed border-white/10 bg-transparent text-slate-500'
+                    : user
                     ? 'border-cyan-300/20 bg-cyan-400/10 text-cyan-100 hover:border-cyan-300 hover:text-white'
                     : 'border-amber-300/20 bg-amber-300/10 text-amber-50 hover:bg-amber-300/15'
                 }`}
               >
-                {user ? 'Buy Now' : 'Unlock Checkout'}
+                {selectedProduct.stock <= 0 ? 'Coming Soon' : user ? 'Buy Now' : 'Unlock Checkout'}
               </button>
               <button
                 onClick={() => toggleWishlist(selectedProduct)}
@@ -1560,6 +1780,7 @@ const App: React.FC = () => {
       );
     }
     const featuredCategories = Array.from(new Set(cart.map((item) => item.category))).slice(0, 3);
+    const selectedAddressMeta = selectedAddress ? getIndianLocationMeta(selectedAddress.city) : null;
 
     return (
       <div className="mx-auto max-w-7xl py-10 sm:py-12">
@@ -1615,8 +1836,10 @@ const App: React.FC = () => {
               </div>
               <div className="commerce-card-surface rounded-[1.9rem] border border-white/10 p-5">
                 <p className="text-[11px] font-bold uppercase tracking-[0.3em] text-cyan-100/70">Delivery Window</p>
-                <p className="mt-3 text-2xl font-black text-white">{cart.length > 0 ? '2-4 days' : 'Standby'}</p>
-                <p className="mt-2 text-sm text-slate-300">Fast, tracked shipping activated at checkout.</p>
+                <p className="mt-3 text-2xl font-black text-white">{selectedAddressMeta?.deliveryLabel ?? (cart.length > 0 ? 'Add address' : 'Standby')}</p>
+                <p className="mt-2 text-sm text-slate-300">
+                  {selectedAddress ? `Routing to ${selectedAddress.city}, ${selectedAddress.state}.` : 'Fast, tracked shipping activates after you add an Indian address.'}
+                </p>
               </div>
               <div className="commerce-card-surface rounded-[1.9rem] border border-white/10 p-5">
                 <p className="text-[11px] font-bold uppercase tracking-[0.3em] text-cyan-100/70">Member Sync</p>
@@ -1635,6 +1858,96 @@ const App: React.FC = () => {
             {cartError}
           </p>
         )}
+
+        <section className="commerce-card-surface mt-8 rounded-[2.2rem] border border-white/10 p-6 sm:p-7">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+            <div>
+              <p className="text-[11px] font-bold uppercase tracking-[0.3em] text-cyan-100/70">Shipping Address</p>
+              <h2 className="mt-3 text-2xl font-black text-white">India-only delivery routing</h2>
+              <p className="mt-3 max-w-2xl text-sm leading-6 text-slate-300">
+                Only locations within India are allowed. Kolkata is highlighted by default, and every checkout address is validated before the order is placed.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => goToView('profile', { profileTab: 'addresses' })}
+              className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.06] px-4 py-3 text-sm font-semibold text-slate-100 transition-all duration-300 hover:border-white/20 hover:bg-white/[0.1]"
+            >
+              Manage Addresses
+              <ArrowRight className="h-4 w-4" />
+            </button>
+          </div>
+
+          {addressError && (
+            <p className="mt-5 rounded-[1.2rem] border border-red-300/20 bg-red-500/10 px-4 py-3 text-sm font-semibold text-red-100">
+              {addressError}
+            </p>
+          )}
+
+          {isAddressesLoading ? (
+            <div className="mt-6 grid gap-3 md:grid-cols-2">
+              {[0, 1].map((index) => (
+                <div key={index} className="rounded-[1.5rem] border border-white/10 bg-white/[0.05] px-5 py-5">
+                  <div className="h-4 w-24 rounded-full bg-white/10" />
+                  <div className="mt-4 h-5 w-2/3 rounded-full bg-white/10" />
+                  <div className="mt-3 h-4 w-5/6 rounded-full bg-white/10" />
+                </div>
+              ))}
+            </div>
+          ) : addresses.length === 0 ? (
+            <div className="mt-6 rounded-[1.8rem] border border-dashed border-white/10 bg-white/[0.04] px-6 py-8 text-center">
+              <p className="text-lg font-black text-white">No Indian shipping address saved yet</p>
+              <p className="mt-2 text-sm leading-6 text-slate-300">
+                Add a shipping address in your profile to unlock checkout, delivery estimates, and live order tracking.
+              </p>
+            </div>
+          ) : (
+            <div className="mt-6 grid gap-3 md:grid-cols-2">
+              {addresses.map((address) => {
+                const isSelected = selectedAddress?.id === address.id;
+
+                return (
+                  <button
+                    key={address.id}
+                    type="button"
+                    onClick={() => setSelectedAddressId(address.id)}
+                    className={`rounded-[1.6rem] border px-5 py-5 text-left transition-all duration-300 ${
+                      isSelected
+                        ? 'border-cyan-200/30 bg-cyan-200/10 shadow-[0_18px_36px_-28px_rgba(103,232,249,0.75)]'
+                        : 'border-white/10 bg-white/[0.05] hover:border-white/20 hover:bg-white/[0.08]'
+                    }`}
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <p className="text-sm font-black text-white">{address.name}</p>
+                        <p className="mt-1 text-xs font-bold uppercase tracking-[0.18em] text-cyan-100/75">
+                          {address.city}, {address.state}
+                        </p>
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        {address.isDefault && (
+                          <span className="rounded-full border border-emerald-300/20 bg-emerald-400/10 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.18em] text-emerald-100">
+                            Default
+                          </span>
+                        )}
+                        {isSelected && (
+                          <span className="rounded-full border border-cyan-300/20 bg-cyan-300/10 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.18em] text-cyan-100">
+                            Selected
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                    <p className="mt-4 text-sm leading-6 text-slate-300">{address.addressLine}</p>
+                    <div className="mt-4 flex flex-wrap gap-3 text-xs font-semibold text-slate-300">
+                      <span>{address.phone}</span>
+                      <span>Pincode {address.pincode}</span>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </section>
 
         {cart.length === 0 ? (
           <section className="commerce-card-surface mt-8 overflow-hidden rounded-[2.5rem] border border-dashed border-white/10 px-6 py-16 text-center sm:px-10 sm:py-20">
@@ -1817,13 +2130,28 @@ const App: React.FC = () => {
                   </div>
                 </div>
 
+                <div className="mt-6 rounded-[1.4rem] border border-white/10 bg-slate-950/35 px-4 py-4">
+                  <p className="text-[10px] font-bold uppercase tracking-[0.24em] text-slate-400">Delivering To</p>
+                  {selectedAddress ? (
+                    <>
+                      <p className="mt-3 text-base font-black text-white">{selectedAddress.city}, {selectedAddress.state}</p>
+                      <p className="mt-2 text-sm leading-6 text-slate-300">{selectedAddress.addressLine}</p>
+                      <p className="mt-2 text-xs font-semibold uppercase tracking-[0.18em] text-cyan-100/75">
+                        {selectedAddress.pincode} · {selectedAddressMeta?.deliveryLabel ?? 'Fast tracked dispatch'}
+                      </p>
+                    </>
+                  ) : (
+                    <p className="mt-3 text-sm leading-6 text-slate-300">Add an Indian shipping address to continue with checkout.</p>
+                  )}
+                </div>
+
                 <button
                   type="button"
                   onClick={handleCheckout}
-                  disabled={isCheckoutLoading || isCartLoading}
-                  className={`mt-8 inline-flex w-full items-center justify-center gap-3 rounded-[1.5rem] bg-gradient-to-r from-cyan-300 via-sky-300 to-fuchsia-300 px-5 py-4 text-lg font-black text-slate-950 shadow-[0_24px_46px_-30px_rgba(103,232,249,0.95)] transition-all duration-300 hover:-translate-y-0.5 hover:shadow-[0_30px_52px_-30px_rgba(236,72,153,0.78)] ${(isCheckoutLoading || isCartLoading) ? 'opacity-70' : ''}`}
+                  disabled={isCheckoutLoading || isCartLoading || isAddressesLoading || !selectedAddress}
+                  className={`mt-8 inline-flex w-full items-center justify-center gap-3 rounded-[1.5rem] bg-gradient-to-r from-cyan-300 via-sky-300 to-fuchsia-300 px-5 py-4 text-lg font-black text-slate-950 shadow-[0_24px_46px_-30px_rgba(103,232,249,0.95)] transition-all duration-300 hover:-translate-y-0.5 hover:shadow-[0_30px_52px_-30px_rgba(236,72,153,0.78)] ${(isCheckoutLoading || isCartLoading || isAddressesLoading || !selectedAddress) ? 'opacity-70' : ''}`}
                 >
-                  {isCheckoutLoading || isCartLoading ? (
+                  {isCheckoutLoading || isCartLoading || isAddressesLoading ? (
                     <div className="h-7 w-7 rounded-full border-4 border-slate-950/20 border-t-slate-950 animate-spin" />
                   ) : (
                     <>
@@ -1834,7 +2162,7 @@ const App: React.FC = () => {
                 </button>
 
                 <p className="mt-4 text-sm leading-6 text-slate-300">
-                  Secure checkout, fast shipping, and account-synced updates from the moment you place your order.
+                  Secure checkout, India-only delivery validation, and real-time tracked updates from the moment you place your order.
                 </p>
               </div>
 
@@ -2106,96 +2434,36 @@ const App: React.FC = () => {
         user={user}
         initialTab={profileInitialTab}
         onBrowseShop={() => goToView('shop')}
+        addresses={addresses}
+        selectedAddressId={selectedAddressId}
+        isAddressesLoading={isAddressesLoading}
+        addressError={addressError}
+        onSelectAddress={setSelectedAddressId}
+        onSaveAddress={handleSaveAddress}
+        onDeleteAddress={handleDeleteAddress}
       />
     );
   };
 
-  const renderAdmin = () => (
-    <div className="py-12">
-      <div className="flex justify-between items-center mb-10 glass-effect p-8 rounded-3xl">
-        <div>
-          <h1 className="text-4xl font-bold text-gray-900 tracking-tight">Admin Console</h1>
-          <p className="text-gray-500 font-medium">Managing {products.length} catalog items</p>
-        </div>
-        <button className="bg-indigo-600 text-white px-8 py-3 rounded-2xl font-bold hover:bg-indigo-700 transition-all shadow-lg">
-          + New Product
-        </button>
-      </div>
+  const renderAdmin = () => {
+    if (!user || user.role !== 'admin') {
+      return null;
+    }
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-8 mb-12">
-        <div className="bg-white/70 backdrop-blur-md p-10 rounded-[2rem] shadow-sm border border-white/50 flex items-center space-x-8">
-          <div className="p-5 bg-indigo-50 rounded-2xl text-indigo-600 shadow-inner">
-            <svg className="h-10 w-10" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-            </svg>
-          </div>
-          <div>
-            <p className="text-gray-400 font-bold uppercase tracking-widest text-xs">Revenue</p>
-            <p className="text-4xl font-black text-gray-900">{formatPrice(24500)}</p>
-          </div>
-        </div>
-        <div className="bg-white/70 backdrop-blur-md p-10 rounded-[2rem] shadow-sm border border-white/50 flex items-center space-x-8">
-          <div className="p-5 bg-purple-50 rounded-2xl text-purple-600 shadow-inner">
-            <svg className="h-10 w-10" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 11V7a4 4 0 00-8 0v4M5 9h14l1 12H4L5 9z" />
-            </svg>
-          </div>
-          <div>
-            <p className="text-gray-400 font-bold uppercase tracking-widest text-xs">Orders</p>
-            <p className="text-4xl font-black text-gray-900">384</p>
-          </div>
-        </div>
-        <div className="bg-white/70 backdrop-blur-md p-10 rounded-[2rem] shadow-sm border border-white/50 flex items-center space-x-8">
-          <div className="p-5 bg-green-50 rounded-2xl text-green-600 shadow-inner">
-            <svg className="h-10 w-10" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
-            </svg>
-          </div>
-          <div>
-            <p className="text-gray-400 font-bold uppercase tracking-widest text-xs">Users</p>
-            <p className="text-4xl font-black text-gray-900">1,202</p>
-          </div>
-        </div>
-      </div>
+    return (
+      <AdminPanel
+        user={user}
+        onCatalogUpdated={(nextCatalog) => {
+          const filteredCatalog = nextCatalog.filter((product) =>
+            isStorefrontProduct(product) && (selectedLocation === 'All' ? true : product.location === selectedLocation)
+          );
 
-      <div className="glass-effect rounded-[3rem] shadow-2xl border border-white/50 overflow-hidden bg-white/40">
-        <table className="w-full text-left">
-          <thead className="bg-gray-900 text-white text-xs uppercase tracking-[0.2em] font-black">
-            <tr>
-              <th className="px-10 py-6">Product Information</th>
-              <th className="px-10 py-6">Category</th>
-              <th className="px-10 py-6">Price Point</th>
-              <th className="px-10 py-6">Inventory</th>
-              <th className="px-10 py-6 text-right">Actions</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-white/20">
-            {products.map(p => (
-              <tr key={p.id} className="hover:bg-white/40 transition-colors">
-                <td className="px-10 py-8">
-                  <div className="flex items-center space-x-5">
-                    <img src={p.image} className="h-16 w-16 rounded-2xl object-cover shadow-sm ring-2 ring-white" />
-                    <span className="font-bold text-gray-900 text-lg">{p.name}</span>
-                  </div>
-                </td>
-                <td className="px-10 py-8 text-gray-600 font-semibold">{p.category}</td>
-                <td className="px-10 py-8 font-black text-gray-900 text-lg">{formatPrice(p.price)}</td>
-                <td className="px-10 py-8">
-                  <span className={`px-5 py-2 rounded-full text-xs font-black uppercase tracking-widest ${p.stock < 10 ? 'bg-red-500 text-white shadow-lg' : 'bg-green-500 text-white shadow-lg'}`}>
-                    {p.stock} units
-                  </span>
-                </td>
-                <td className="px-10 py-8 text-right space-x-6 font-bold">
-                  <button className="text-indigo-600 hover:text-indigo-800 transition-colors">Edit</button>
-                  <button className="text-red-600 hover:text-red-800 transition-colors">Archive</button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  );
+          setProducts(filteredCatalog);
+          setSelectedProduct((current) => (current ? nextCatalog.find((product) => product.id === current.id) ?? null : null));
+        }}
+      />
+    );
+  };
 
   return (
     <div className="dark-theme min-h-screen flex flex-col">
@@ -2212,6 +2480,7 @@ const App: React.FC = () => {
         onProfileClick={() => goToView('profile')}
         onLogout={() => {
           pendingProtectedViewRef.current = null;
+          clearPostAuthRedirectPath();
           updateBrowserPath('home', true);
           logoutUser();
           setView('home');
@@ -2268,6 +2537,7 @@ const App: React.FC = () => {
             updateBrowserPath(user ? currentView : 'home', true);
           }
 
+          clearPostAuthRedirectPath();
           pendingProtectedViewRef.current = null;
           closeAuthModal();
         }}

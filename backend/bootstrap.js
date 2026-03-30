@@ -1,6 +1,8 @@
 const { connectDB } = require("./config/db");
 const { loadEnv } = require("./loadEnv");
 const { seedAdminUser } = require("./utils/seedAdmin");
+const { seedDeliveryAgents } = require("./utils/seedDeliveryAgents");
+const { seedProducts } = require("./utils/seedProducts");
 
 let initializationPromise = null;
 
@@ -16,7 +18,10 @@ async function initializeBackend() {
   if (!initializationPromise) {
     initializationPromise = (async () => {
       await connectDB();
-      return seedAdminUser();
+      await seedAdminUser();
+      await seedDeliveryAgents();
+      await seedProducts();
+      return true;
     })().catch((error) => {
       initializationPromise = null;
       throw error;

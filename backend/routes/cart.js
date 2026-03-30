@@ -1,9 +1,13 @@
 const express = require("express");
 
+const DeliveryAgent = require("../models/DeliveryAgent");
 const Order = require("../models/Order");
 const User = require("../models/User");
 const { requireAuth } = require("../middleware/auth");
 const { products } = require("../data/products");
+const { emitOrderUpdate } = require("../realtime/socket");
+const { buildDeliveryEstimate, getLocationByCity, haversineDistanceKm } = require("../utils/india");
+const { createTrackingSteps, syncOrderTracking } = require("../utils/orderTracking");
 
 const router = express.Router();
 
@@ -99,6 +103,51 @@ async function loadUser(userId) {
   return User.findById(userId);
 }
 
+function resolveShippingAddress(user, addressId) {
+  if (!Array.isArray(user.addresses) || user.addresses.length === 0) {
+    return null;
+  }
+
+  if (typeof addressId === "string" && addressId.trim()) {
+    return user.addresses.id(addressId.trim()) || null;
+  }
+
+  return user.addresses.find((address) => address.isDefault) || user.addresses[0] || null;
+}
+
+async function assignNearestAgent(city) {
+  const destination = getLocationByCity(city);
+  if (!destination) {
+    return null;
+  }
+
+  const agents = await DeliveryAgent.find({
+    availability: { $in: ["available", "busy"] },
+  });
+
+  if (agents.length === 0) {
+    return null;
+  }
+
+  return agents
+    .map((agent) => ({
+      agent,
+      distance: haversineDistanceKm(agent.currentLocation, destination),
+    }))
+    .sort((left, right) => left.distance - right.distance)[0].agent;
+}
+
+function serializeAddress(address) {
+  return {
+    name: address.name,
+    phone: address.phone,
+    addressLine: address.addressLine,
+    city: address.city,
+    state: address.state,
+    pincode: address.pincode,
+  };
+}
+
 router.get("/", requireAuth, async (req, res) => {
   try {
     const user = await loadUser(req.authUser.id);
@@ -144,27 +193,92 @@ router.post("/checkout", requireAuth, async (req, res) => {
       return res.status(400).json({ message: "Cart is empty." });
     }
 
+    const unavailableItems = cartResponse.items.filter((item) => item.stock <= 0);
+    if (unavailableItems.length > 0) {
+      return res.status(400).json({
+        message: `${unavailableItems[0].name} is currently out of stock.`,
+      });
+    }
+
+    const shippingAddress = resolveShippingAddress(user, req.body?.addressId);
+    if (!shippingAddress) {
+      return res.status(400).json({
+        message: "Add a valid Indian shipping address before checkout.",
+      });
+    }
+
+    const [estimatedDelivery, deliveryAgent] = await Promise.all([
+      Promise.resolve(buildDeliveryEstimate(shippingAddress.city)),
+      assignNearestAgent(shippingAddress.city),
+    ]);
+
+    const dispatchLocation =
+      deliveryAgent?.currentLocation || getLocationByCity(shippingAddress.city);
+
     const order = await Order.create({
-      userId: user._id,
-      items: buildOrderItems(cartResponse.items),
-      subtotal: cartResponse.summary.subtotal,
-      shipping: cartResponse.summary.shipping,
-      tax: cartResponse.summary.tax,
-      total: cartResponse.summary.total,
-      status: "pending",
-    });
+       userId: user._id,
+       items: buildOrderItems(cartResponse.items),
+       subtotal: cartResponse.summary.subtotal,
+       shipping: cartResponse.summary.shipping,
+       tax: cartResponse.summary.tax,
+       total: cartResponse.summary.total,
+       status: "placed",
+       shippingAddress: serializeAddress(shippingAddress),
+       estimatedDelivery,
+       deliveryAgent: deliveryAgent
+         ? {
+             id: deliveryAgent._id.toString(),
+             name: deliveryAgent.name,
+             email: deliveryAgent.email,
+             phone: deliveryAgent.phone,
+           }
+         : null,
+       dispatchLocation: dispatchLocation
+         ? {
+             city: dispatchLocation.city,
+             state: dispatchLocation.state,
+             lat: dispatchLocation.lat,
+             lng: dispatchLocation.lng,
+             updatedAt: new Date(),
+             label: "Fulfillment hub",
+           }
+         : null,
+       latestAgentLocation: dispatchLocation
+         ? {
+             city: dispatchLocation.city,
+             state: dispatchLocation.state,
+             lat: dispatchLocation.lat,
+             lng: dispatchLocation.lng,
+             updatedAt: new Date(),
+             label: "Assigned hub",
+           }
+         : null,
+       trackingSteps: createTrackingSteps(new Date()),
+     });
 
     user.cartItems = [];
     await user.save();
 
+    if (deliveryAgent) {
+      deliveryAgent.availability = "busy";
+      deliveryAgent.activeOrderId = order._id;
+      await deliveryAgent.save();
+    }
+
+    await syncOrderTracking(order);
+    emitOrderUpdate(order);
+
     return res.json({
-      message: "Order placed successfully.",
-      orderSummary: cartResponse.summary,
-      items: cartResponse.items,
-      orderId: order._id.toString(),
-    });
-  } catch (error) {
-    return res.status(500).json({ message: "Checkout failed." });
+       message: "Order placed successfully.",
+       orderSummary: cartResponse.summary,
+       items: cartResponse.items,
+       orderId: order._id.toString(),
+       orderNumber: order.orderNumber,
+       shippingAddress: serializeAddress(shippingAddress),
+       estimatedDelivery: order.estimatedDelivery,
+     });
+   } catch (error) {
+     return res.status(500).json({ message: "Checkout failed." });
   }
 });
 

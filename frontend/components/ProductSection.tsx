@@ -70,7 +70,7 @@ const ProductSection: React.FC<ProductSectionProps> = ({
         </div>
 
         {isLoading ? (
-          <div className="grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-4">
+          <div className="grid grid-cols-2 gap-4 lg:grid-cols-4 2xl:grid-cols-5">
             {Array.from({ length: SKELETON_COUNT }).map((_, index) => (
               <div
                 key={`${title}-skeleton-${index}`}
@@ -93,7 +93,7 @@ const ProductSection: React.FC<ProductSectionProps> = ({
           </div>
         ) : (
           <>
-            <div className="grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-4">
+            <div className="grid grid-cols-2 gap-4 lg:grid-cols-4 2xl:grid-cols-5">
               {visibleProducts.map((product) => (
                 <ProductCard
                   key={product.id}

@@ -1,6 +1,14 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { User } from '../types';
-import { getCurrentUser, login, logout, register } from '../services/authService';
+import {
+  clearPostAuthRedirectPath,
+  consumeGoogleAuthRedirect,
+  getCurrentUser,
+  login,
+  logout,
+  register,
+  startGoogleAuth,
+} from '../services/authService';
 
 export type AuthMode = 'login' | 'register';
 
@@ -17,7 +25,7 @@ interface AuthContextValue {
   loginWithPassword: (email: string, password: string) => Promise<void>;
   registerWithPassword: (name: string, email: string, password: string) => Promise<void>;
   handleLogout: () => Promise<void>;
-  handleGoogleAuth: () => void;
+  handleGoogleAuth: (mode?: AuthMode) => void;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -35,6 +43,7 @@ export const AuthProvider: React.FC<React.PropsWithChildren> = ({ children }) =>
     let mounted = true;
 
     const bootstrapAuth = async () => {
+      const googleRedirect = consumeGoogleAuthRedirect();
       const currentUser = await getCurrentUser();
 
       if (!mounted) {
@@ -42,6 +51,17 @@ export const AuthProvider: React.FC<React.PropsWithChildren> = ({ children }) =>
       }
 
       setUser(currentUser);
+      if (googleRedirect?.type === 'error') {
+        setAuthMode(googleRedirect.mode);
+        setAuthError(googleRedirect.message ?? 'Unable to continue with Google right now.');
+        setAuthPromptMessage('Continue with Google again or use your email and password.');
+        setIsLoginModalOpen(true);
+      } else if (googleRedirect?.type === 'success' && !currentUser) {
+        setAuthMode(googleRedirect.mode);
+        setAuthError('Google sign-in finished, but we could not load your account. Please try again.');
+        setAuthPromptMessage('Continue with Google again or use your email and password.');
+        setIsLoginModalOpen(true);
+      }
       setIsAuthLoading(false);
     };
 
@@ -53,7 +73,9 @@ export const AuthProvider: React.FC<React.PropsWithChildren> = ({ children }) =>
   }, []);
 
   const openAuthModal = (mode: AuthMode = 'login', promptMessage: string | null = null) => {
-    setAuthError(null);
+    if (!isLoginModalOpen) {
+      setAuthError(null);
+    }
     setAuthPromptMessage(promptMessage);
     setAuthMode(mode);
     setIsLoginModalOpen(true);
@@ -76,6 +98,7 @@ export const AuthProvider: React.FC<React.PropsWithChildren> = ({ children }) =>
 
     try {
       const loggedInUser = await login(email, password);
+      clearPostAuthRedirectPath();
       setUser(loggedInUser);
       setIsLoginModalOpen(false);
     } catch (error) {
@@ -93,6 +116,7 @@ export const AuthProvider: React.FC<React.PropsWithChildren> = ({ children }) =>
 
     try {
       const createdUser = await register(name, email, password);
+      clearPostAuthRedirectPath();
       setUser(createdUser);
       setIsLoginModalOpen(false);
     } catch (error) {
@@ -114,11 +138,13 @@ export const AuthProvider: React.FC<React.PropsWithChildren> = ({ children }) =>
     setAuthError(null);
     setAuthPromptMessage(null);
     setIsLoginModalOpen(false);
+    clearPostAuthRedirectPath();
   };
 
-  const handleGoogleAuth = () => {
+  const handleGoogleAuth = (mode: AuthMode = authMode) => {
     setAuthError(null);
-    window.open('https://accounts.google.com/', '_blank', 'noopener,noreferrer');
+    setAuthPromptMessage(null);
+    startGoogleAuth(mode);
   };
 
   return (

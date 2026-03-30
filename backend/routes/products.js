@@ -1,5 +1,9 @@
 const express = require("express");
+
+const { initializeBackend } = require("../bootstrap");
+const Product = require("../models/Product");
 const { products } = require("../data/products");
+const { getLocationByCity } = require("../utils/india");
 
 const router = express.Router();
 
@@ -7,14 +11,28 @@ function normalizeQueryValue(value) {
   return typeof value === "string" ? value.trim().toLowerCase() : "";
 }
 
-router.get("/", (req, res) => {
+async function getProductCatalog() {
+  if (!process.env.MONGODB_URI) {
+    return products;
+  }
+
+  try {
+    await initializeBackend();
+    const dbProducts = await Product.find({}).lean();
+    return dbProducts.length > 0 ? dbProducts : products;
+  } catch (error) {
+    return products;
+  }
+}
+
+router.get("/", async (req, res) => {
   const category = normalizeQueryValue(req.query.category);
   const gender = normalizeQueryValue(req.query.gender);
   const type = normalizeQueryValue(req.query.type);
   const location = normalizeQueryValue(req.query.location);
   const query = normalizeQueryValue(req.query.q);
 
-  let filteredProducts = [...products];
+  let filteredProducts = [...(await getProductCatalog())];
 
   if (category && category !== "all") {
     filteredProducts = filteredProducts.filter(
@@ -35,6 +53,10 @@ router.get("/", (req, res) => {
   }
 
   if (location && location !== "all") {
+    if (!getLocationByCity(location)) {
+      return res.status(400).json({ message: "Only locations within India are allowed" });
+    }
+
     filteredProducts = filteredProducts.filter(
       (product) => product.location.toLowerCase() === location
     );

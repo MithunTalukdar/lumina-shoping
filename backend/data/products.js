@@ -1,10 +1,84 @@
+const { resolveCatalogLocation } = require("../utils/india");
+
+const PRICE_BANDS = [400, 410, 420, 430, 440, 450, 460, 470, 480, 490, 500];
+const DISCOUNT_BANDS = [0, 10, 12, 15, 18];
+
+function buildOptimizedImage(rawUrl, variant) {
+  try {
+    const imageUrl = new URL(rawUrl);
+    imageUrl.searchParams.set("auto", "format");
+    imageUrl.searchParams.set("fm", "webp");
+    imageUrl.searchParams.set("fit", "crop");
+    imageUrl.searchParams.set("w", variant === 0 ? "900" : "780");
+    imageUrl.searchParams.set("h", "1080");
+    imageUrl.searchParams.set("q", "82");
+    imageUrl.searchParams.set("crop", variant === 0 ? "faces" : variant === 1 ? "entropy" : "center");
+    return imageUrl.toString();
+  } catch {
+    return rawUrl;
+  }
+}
+
+function buildImageGallery(rawUrl) {
+  return [0, 1, 2].map((variant) => buildOptimizedImage(rawUrl, variant));
+}
+
+function normalizeCatalogPrice(seedPrice, index) {
+  const bandIndex = Math.abs(Math.round(seedPrice / 10) + index * 7) % PRICE_BANDS.length;
+  return PRICE_BANDS[bandIndex];
+}
+
+function normalizeStock(seedStock, index) {
+  return (index + 1) % 9 === 0 ? 0 : Math.max(4, Math.min(24, seedStock));
+}
+
+function resolveDiscountPercentage(seedPrice, reviewsCount, index) {
+  const bandIndex = Math.abs(Math.round(seedPrice / 10) + reviewsCount + index) % DISCOUNT_BANDS.length;
+  const nextDiscount = DISCOUNT_BANDS[bandIndex];
+  return nextDiscount > 0 ? nextDiscount : undefined;
+}
+
+function buildBadges(index, rating, reviewsCount, stock) {
+  if (stock <= 0) {
+    return ["Out of Stock"];
+  }
+
+  const badges = [];
+
+  if ((index + 1) % 4 === 0) {
+    badges.push("New");
+  }
+
+  if (rating >= 4.8 || reviewsCount >= 100) {
+    badges.push("Trending");
+  }
+
+  return badges;
+}
+
 function createProducts(gender, type, items) {
-  return items.map((item, index) => ({
-    ...item,
-    id: `${gender}-${type}-${index + 1}`,
-    gender,
-    type,
-  }));
+  return items.map((item, index) => {
+    const price = normalizeCatalogPrice(item.price, index);
+    const stock = normalizeStock(item.stock, index);
+    const discountPercentage = resolveDiscountPercentage(item.price, item.reviewsCount, index);
+    const images = buildImageGallery(item.image);
+    const badges = buildBadges(index, item.rating, item.reviewsCount, stock);
+
+    return {
+      ...item,
+      id: `${gender}-${type}-${index + 1}`,
+      gender,
+      type,
+      price,
+      stock,
+      location: resolveCatalogLocation(item.location, index),
+      image: images[0],
+      images,
+      originalPrice: discountPercentage ? Math.round((price / (1 - discountPercentage / 100)) / 10) * 10 : undefined,
+      discountPercentage,
+      badges,
+    };
+  });
 }
 
 const menClothingSeed = [

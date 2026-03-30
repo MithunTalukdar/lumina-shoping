@@ -1,18 +1,98 @@
-import { Product } from "./types";
+import { Product, ProductBadge } from "./types";
+import { IndianCatalogLocation } from "./utils/india";
 
-type CatalogSeed = Omit<Product, "id" | "gender" | "type">;
+type CatalogSeed = Omit<Product, "id" | "gender" | "type" | "location"> & { location: string };
+
+const PRICE_BANDS = [400, 410, 420, 430, 440, 450, 460, 470, 480, 490, 500];
+const DISCOUNT_BANDS = [0, 10, 12, 15, 18];
+
+const LOCATION_ROTATION: Record<string, IndianCatalogLocation[]> = {
+  India: ['Kolkata', 'Mumbai', 'Delhi', 'Bengaluru'],
+  NRI: ['Hyderabad', 'Pune', 'Ahmedabad'],
+  Dhaka: ['Chennai', 'Jaipur', 'Lucknow'],
+};
+
+const resolveCatalogLocation = (seedLocation: string, index: number): IndianCatalogLocation => {
+  const options = LOCATION_ROTATION[seedLocation] ?? LOCATION_ROTATION.India;
+  return options[index % options.length];
+};
+
+const buildOptimizedImage = (rawUrl: string, variant: number) => {
+  try {
+    const imageUrl = new URL(rawUrl);
+    imageUrl.searchParams.set('auto', 'format');
+    imageUrl.searchParams.set('fm', 'webp');
+    imageUrl.searchParams.set('fit', 'crop');
+    imageUrl.searchParams.set('w', variant === 0 ? '900' : '780');
+    imageUrl.searchParams.set('h', '1080');
+    imageUrl.searchParams.set('q', '82');
+    imageUrl.searchParams.set('crop', variant === 0 ? 'faces' : variant === 1 ? 'entropy' : 'center');
+    return imageUrl.toString();
+  } catch {
+    return rawUrl;
+  }
+};
+
+const buildImageGallery = (rawUrl: string) => [0, 1, 2].map((variant) => buildOptimizedImage(rawUrl, variant));
+
+const normalizeCatalogPrice = (seedPrice: number, index: number) => {
+  const bandIndex = Math.abs(Math.round(seedPrice / 10) + index * 7) % PRICE_BANDS.length;
+  return PRICE_BANDS[bandIndex];
+};
+
+const normalizeStock = (seedStock: number, index: number) => ((index + 1) % 9 === 0 ? 0 : Math.max(4, Math.min(24, seedStock)));
+
+const resolveDiscountPercentage = (seedPrice: number, reviewsCount: number, index: number) => {
+  const bandIndex = Math.abs(Math.round(seedPrice / 10) + reviewsCount + index) % DISCOUNT_BANDS.length;
+  const nextDiscount = DISCOUNT_BANDS[bandIndex];
+  return nextDiscount > 0 ? nextDiscount : undefined;
+};
+
+const buildBadges = (index: number, rating: number, reviewsCount: number, stock: number): ProductBadge[] => {
+  if (stock <= 0) {
+    return ['Out of Stock'];
+  }
+
+  const badges: ProductBadge[] = [];
+
+  if ((index + 1) % 4 === 0) {
+    badges.push('New');
+  }
+
+  if (rating >= 4.8 || reviewsCount >= 100) {
+    badges.push('Trending');
+  }
+
+  return badges;
+};
 
 const createProducts = (
   gender: Product["gender"],
   type: Product["type"],
   items: CatalogSeed[]
 ): Product[] =>
-  items.map((item, index) => ({
-    ...item,
-    id: `${gender}-${type}-${index + 1}`,
-    gender,
-    type,
-  }));
+  items.map((item, index) => {
+    const price = normalizeCatalogPrice(item.price, index);
+    const stock = normalizeStock(item.stock, index);
+    const discountPercentage = resolveDiscountPercentage(item.price, item.reviewsCount, index);
+    const images = buildImageGallery(item.image);
+    const badges = buildBadges(index, item.rating, item.reviewsCount, stock);
+
+    return {
+      ...item,
+      id: `${gender}-${type}-${index + 1}`,
+      gender,
+      type,
+      price,
+      stock,
+      location: resolveCatalogLocation(item.location, index),
+      image: images[0],
+      images,
+      originalPrice: discountPercentage ? Math.round((price / (1 - discountPercentage / 100)) / 10) * 10 : undefined,
+      discountPercentage,
+      badges,
+    };
+  });
 
 const menClothingSeed: CatalogSeed[] = [
   {

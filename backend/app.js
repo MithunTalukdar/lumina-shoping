@@ -4,10 +4,13 @@ const express = require("express");
 const { initializeBackend } = require("./bootstrap");
 const { getDBStatus } = require("./config/db");
 const { loadEnv } = require("./loadEnv");
+const adminRoutes = require("./routes/admin");
 const assistantRoutes = require("./routes/assistant");
+const accountRoutes = require("./routes/account");
 const authRoutes = require("./routes/auth");
 const cartRoutes = require("./routes/cart");
 const changePasswordRoutes = require("./routes/changePassword");
+const deliveryRoutes = require("./routes/delivery");
 const ordersRoutes = require("./routes/orders");
 const productRoutes = require("./routes/products");
 const wishlistRoutes = require("./routes/wishlist");
@@ -35,6 +38,7 @@ const vercelOrigin = process.env.VERCEL_PROJECT_PRODUCTION_URL
     : "";
 
 const allowedOrigins = [...new Set([...defaultOrigins, ...configuredOrigins, vercelOrigin].filter(Boolean))];
+app.locals.allowedOrigins = allowedOrigins;
 
 app.use(
   cors({
@@ -73,7 +77,10 @@ app.use(async (req, _res, next) => {
     req.path.startsWith("/api/cart") ||
     req.path.startsWith("/api/wishlist") ||
     req.path.startsWith("/api/orders") ||
-    req.path.startsWith("/api/change-password");
+    req.path.startsWith("/api/change-password") ||
+    req.path.startsWith("/api/account") ||
+    req.path.startsWith("/api/delivery") ||
+    req.path.startsWith("/api/admin");
 
   if (!needsDatabase) {
     return next();
@@ -98,6 +105,9 @@ app.use("/api/auth", authRoutes);
 app.use("/api/cart", cartRoutes);
 app.use("/api/wishlist", wishlistRoutes);
 app.use("/api/orders", ordersRoutes);
+app.use("/api/admin", adminRoutes);
+app.use("/api/account", accountRoutes);
+app.use("/api/delivery", deliveryRoutes);
 app.use("/api/change-password", changePasswordRoutes);
 
 app.use((error, _req, res, _next) => {

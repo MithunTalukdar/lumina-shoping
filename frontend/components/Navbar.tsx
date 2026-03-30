@@ -72,24 +72,26 @@ const Navbar: React.FC<NavbarProps> = ({
     view: AppView;
     icon: LucideIcon;
     tone: string;
-  }[] = [
-    {
-      label: 'Wishlist',
-      caption: 'Saved picks',
-      count: wishlistCount,
-      view: 'wishlist',
-      icon: Heart,
-      tone: 'from-rose-400/30 via-pink-400/[0.15] to-orange-300/20',
-    },
-    {
-      label: 'Cart',
-      caption: 'Ready to ship',
-      count: cartCount,
-      view: 'cart',
-      icon: ShoppingBag,
-      tone: 'from-cyan-400/30 via-sky-300/[0.15] to-indigo-400/20',
-    },
-  ];
+  }[] = user
+    ? [
+        {
+          label: 'Wishlist',
+          caption: 'Saved picks',
+          count: wishlistCount,
+          view: 'wishlist',
+          icon: Heart,
+          tone: 'from-rose-400/30 via-pink-400/[0.15] to-orange-300/20',
+        },
+        {
+          label: 'Cart',
+          caption: 'Ready to ship',
+          count: cartCount,
+          view: 'cart',
+          icon: ShoppingBag,
+          tone: 'from-cyan-400/30 via-sky-300/[0.15] to-indigo-400/20',
+        },
+      ]
+    : [];
 
   const isNavItemActive = (view: AppView) => currentView === view || (view === 'shop' && currentView === 'product');
   const isQuickActionActive = (view: AppView) => currentView === view;
@@ -257,20 +259,21 @@ const Navbar: React.FC<NavbarProps> = ({
                 <div className="hidden items-center gap-2 md:flex">
                   <button
                     type="button"
-                    onClick={handleProfileClick}
-                    className="hidden items-center gap-2 rounded-2xl border border-white/10 bg-white/[0.08] px-4 py-3 text-sm font-semibold text-slate-100 transition-all duration-300 hover:border-white/[0.25] hover:bg-white/[0.12] lg:inline-flex"
+                    onClick={onRegister}
+                    disabled={isAuthLoading}
+                    className="hidden items-center gap-2 rounded-2xl border border-white/10 bg-white/[0.08] px-4 py-3 text-sm font-semibold text-slate-100 transition-all duration-300 hover:border-white/[0.25] hover:bg-white/[0.12] disabled:cursor-not-allowed disabled:opacity-70 lg:inline-flex"
                   >
                     <UserRound className="h-4 w-4" />
-                    Profile
+                    Register
                   </button>
                   <button
                     type="button"
                     onClick={onGoogle}
                     disabled={isAuthLoading}
-                    className="hidden items-center gap-2 rounded-2xl border border-white/10 bg-white/[0.08] px-4 py-3 text-sm font-semibold text-slate-100 transition-all duration-300 hover:border-white/[0.25] hover:bg-white/[0.12] disabled:cursor-not-allowed disabled:opacity-70 2xl:inline-flex"
+                    className="hidden items-center gap-2 rounded-2xl border border-white/15 bg-white px-4 py-3 text-sm font-semibold text-slate-900 transition-all duration-300 hover:-translate-y-0.5 hover:border-white/30 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-70 xl:inline-flex"
                   >
                     <GoogleIcon className="h-4 w-4" />
-                    Google
+                    Google Sign In
                   </button>
                   <button
                     type="button"
@@ -343,36 +346,38 @@ const Navbar: React.FC<NavbarProps> = ({
                   })}
                 </div>
 
-                <div className="mt-4 grid grid-cols-2 gap-2">
-                  {quickActions.map(action => {
-                    const Icon = action.icon;
-                    const isActive = isQuickActionActive(action.view);
+                {quickActions.length > 0 && (
+                  <div className="mt-4 grid grid-cols-2 gap-2">
+                    {quickActions.map(action => {
+                      const Icon = action.icon;
+                      const isActive = isQuickActionActive(action.view);
 
-                    return (
-                      <button
-                        key={action.view}
-                        type="button"
-                        onClick={() => handleViewChange(action.view)}
-                        className={`rounded-[22px] border px-4 py-4 text-left transition-all duration-300 ${
-                          isActive
-                            ? 'border-white/[0.30] bg-white/[0.12] text-white'
-                            : 'border-white/10 bg-white/[0.06] text-slate-100 hover:border-white/20 hover:bg-white/10'
-                        }`}
-                      >
-                        <span className={`mb-3 flex h-10 w-10 items-center justify-center rounded-2xl bg-gradient-to-br ${action.tone}`}>
-                          <Icon className="h-[18px] w-[18px]" />
-                        </span>
-                        <span className="block text-[10px] font-semibold uppercase tracking-[0.26em] text-slate-400">
-                          {action.caption}
-                        </span>
-                        <span className="mt-1 block text-sm font-semibold">{action.label}</span>
-                        <span className="mt-1 block text-xs text-slate-400">
-                          {action.count > 0 ? `${action.count} item${action.count > 1 ? 's' : ''}` : 'Nothing waiting yet'}
-                        </span>
-                      </button>
-                    );
-                  })}
-                </div>
+                      return (
+                        <button
+                          key={action.view}
+                          type="button"
+                          onClick={() => handleViewChange(action.view)}
+                          className={`rounded-[22px] border px-4 py-4 text-left transition-all duration-300 ${
+                            isActive
+                              ? 'border-white/[0.30] bg-white/[0.12] text-white'
+                              : 'border-white/10 bg-white/[0.06] text-slate-100 hover:border-white/20 hover:bg-white/10'
+                          }`}
+                        >
+                          <span className={`mb-3 flex h-10 w-10 items-center justify-center rounded-2xl bg-gradient-to-br ${action.tone}`}>
+                            <Icon className="h-[18px] w-[18px]" />
+                          </span>
+                          <span className="block text-[10px] font-semibold uppercase tracking-[0.26em] text-slate-400">
+                            {action.caption}
+                          </span>
+                          <span className="mt-1 block text-sm font-semibold">{action.label}</span>
+                          <span className="mt-1 block text-xs text-slate-400">
+                            {action.count > 0 ? `${action.count} item${action.count > 1 ? 's' : ''}` : 'Nothing waiting yet'}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
 
                 {user ? (
                   <div className="mt-4 grid gap-2">
@@ -424,11 +429,15 @@ const Navbar: React.FC<NavbarProps> = ({
                   <div className="mt-4 grid gap-2">
                     <button
                       type="button"
-                      onClick={handleProfileClick}
-                      className="inline-flex w-full items-center justify-center gap-2 rounded-[22px] border border-white/10 bg-white/[0.08] px-4 py-4 text-sm font-semibold text-slate-100 transition-all duration-300 hover:border-white/[0.25] hover:bg-white/[0.12]"
+                      onClick={() => {
+                        onRegister();
+                        setIsMobileMenuOpen(false);
+                      }}
+                      disabled={isAuthLoading}
+                      className="inline-flex w-full items-center justify-center gap-2 rounded-[22px] border border-white/10 bg-white/[0.08] px-4 py-4 text-sm font-semibold text-slate-100 transition-all duration-300 hover:border-white/[0.25] hover:bg-white/[0.12] disabled:cursor-not-allowed disabled:opacity-70"
                     >
                       <UserRound className="h-4 w-4" />
-                      Open Profile
+                      Register
                     </button>
                     <button
                       type="button"

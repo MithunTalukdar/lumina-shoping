@@ -1,4 +1,4 @@
-import { Product } from '../types';
+import { Product, ProductBadge } from '../types';
 import { buildApiUrl } from './apiBase';
 import { authHeaders } from './authService';
 
@@ -15,6 +15,10 @@ function isNonEmptyString(value: unknown): value is string {
 
 function isNumber(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value);
+}
+
+function isProductBadge(value: unknown): value is ProductBadge {
+  return value === 'New' || value === 'Trending' || value === 'Out of Stock';
 }
 
 function normalizeProduct(value: unknown): Product | null {
@@ -46,11 +50,15 @@ function normalizeProduct(value: unknown): Product | null {
     category: item.category,
     gender: isNonEmptyString(item.gender) ? item.gender as Product['gender'] : 'men',
     type: isNonEmptyString(item.type) ? item.type as Product['type'] : 'clothing',
-    location: isNonEmptyString(item.location) ? item.location as Product['location'] : 'India',
+    location: isNonEmptyString(item.location) ? item.location as Product['location'] : 'Kolkata',
     image: item.image,
+    images: Array.isArray(item.images) ? item.images.filter(isNonEmptyString) : undefined,
     stock: item.stock,
     rating: item.rating,
     reviewsCount: item.reviewsCount,
+    discountPercentage: isNumber(item.discountPercentage) ? item.discountPercentage : undefined,
+    originalPrice: isNumber(item.originalPrice) ? item.originalPrice : undefined,
+    badges: Array.isArray(item.badges) ? item.badges.filter(isProductBadge) : undefined,
   };
 }
 

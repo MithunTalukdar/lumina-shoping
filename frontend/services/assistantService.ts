@@ -1,4 +1,5 @@
 import { CartItem, Product, User } from "../types";
+import { INDIAN_LOCATION_OPTIONS } from "../utils/india";
 
 export type AssistantViewState = "idle" | "typing" | "loading" | "results" | "empty";
 
@@ -341,16 +342,19 @@ function findGender(tokens: string[]): Product["gender"] | null {
 }
 
 function findLocation(tokens: string[]): Product["location"] | null {
+  const matchedLocation = INDIAN_LOCATION_OPTIONS.find((location) => {
+    const normalizedCity = location.city.toLowerCase();
+    const normalizedState = location.state.toLowerCase();
+
+    return tokens.includes(normalizedCity) || tokens.includes(normalizedState);
+  });
+
+  if (matchedLocation) {
+    return matchedLocation.city;
+  }
+
   if (tokens.includes("india")) {
-    return "India";
-  }
-
-  if (tokens.includes("nri")) {
-    return "NRI";
-  }
-
-  if (tokens.includes("dhaka")) {
-    return "Dhaka";
+    return "Kolkata";
   }
 
   return null;
